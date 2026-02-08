@@ -3,6 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 
 namespace GMan;
 
@@ -13,6 +14,7 @@ public class MainWindow
     private readonly TextView manPageView;
     private readonly Label statusLabel;
     private readonly TreeView programListView;
+    private readonly Button aboutButton;
     private readonly ListStore programStore;
     private TextTag highlightTag;
     private List<string> allPrograms = new();
@@ -30,14 +32,16 @@ public class MainWindow
         programListView = (TreeView)builder.GetObject("programListView");
         manPageView = (TextView)builder.GetObject("manPageView");
         statusLabel = (Label)builder.GetObject("statusLabel");
+        aboutButton = (Button)builder.GetObject("aboutButton");
 
-        if (mainWindow == null || searchEntry == null || programListView == null || manPageView == null || statusLabel == null)
+        if (mainWindow == null || searchEntry == null || programListView == null || manPageView == null || statusLabel == null || aboutButton == null)
         {
             throw new InvalidOperationException("Failed to load UI from main_window.ui");
         }
 
         mainWindow.DeleteEvent += OnDeleteEvent;
         searchEntry.Changed += OnSearchTextChanged;
+        aboutButton.Clicked += OnAboutClicked;
 
         programStore = new ListStore(typeof(string));
         programListView.Model = programStore;
@@ -49,6 +53,7 @@ public class MainWindow
         column.AddAttribute(cellRenderer, "text", 0);
         programListView.AppendColumn(column);
         programListView.RowActivated += OnProgramSelected;
+        programListView.Selection.Changed += OnProgramSelectionChanged;
 
         manPageView.Editable = false;
         manPageView.WrapMode = WrapMode.Word;
@@ -150,6 +155,18 @@ public class MainWindow
         {
             var program = programStore.GetValue(iter, 0)?.ToString();
             if (!string.IsNullOrEmpty(program))
+            {
+                LoadManPage(program);
+            }
+        }
+    }
+
+    private void OnProgramSelectionChanged(object? sender, EventArgs e)
+    {
+        if (programListView.Selection.GetSelected(out TreeIter iter))
+        {
+            var program = programStore.GetValue(iter, 0)?.ToString();
+            if (!string.IsNullOrEmpty(program) && !string.Equals(program, currentLoadedProgram, StringComparison.OrdinalIgnoreCase))
             {
                 LoadManPage(program);
             }
@@ -308,6 +325,25 @@ public class MainWindow
     {
         Application.Quit();
         args.RetVal = true;
+    }
+
+    private void OnAboutClicked(object? sender, EventArgs e)
+    {
+        string version = Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "0.1.0";
+
+        using var about = new AboutDialog
+        {
+            ProgramName = "GMan",
+            Version = version,
+            Comments = "GTK# man page viewer for X11/Linux",
+            Website = "https://www.yourdev.net/gnome-man-viewer",
+            Authors = new[] { "Maximilian Cornett <max@yourdev.net>",
+                            "https://www.yourdev.net" }
+        };
+
+        about.TransientFor = mainWindow;
+        about.Modal = true;
+        about.Run();
     }
 
     private static string GetUiPath()
