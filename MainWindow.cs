@@ -39,6 +39,26 @@ public class MainWindow
             throw new InvalidOperationException("Failed to load UI from main_window.ui");
         }
 
+        // Set window icon
+        try
+        {
+            string iconPath = System.IO.Path.Combine(AppContext.BaseDirectory, "ui", "icon_128.png");
+            if (File.Exists(iconPath))
+            {
+                Console.WriteLine($"Loading icon from: {iconPath}");
+                mainWindow.SetIconFromFile(iconPath);
+                Console.WriteLine("Icon loaded successfully");
+            }
+            else
+            {
+                Console.WriteLine($"Icon not found at: {iconPath}");
+            }
+        }
+        catch (Exception ex)
+        { 
+            Console.WriteLine($"Icon loading failed: {ex.Message}");
+        }
+
         mainWindow.DeleteEvent += OnDeleteEvent;
         searchEntry.Changed += OnSearchTextChanged;
         aboutButton.Clicked += OnAboutClicked;
@@ -61,6 +81,8 @@ public class MainWindow
         // Create highlight tag for search matches
         highlightTag = new TextTag("highlight");
         highlightTag.Background = "yellow";
+        highlightTag.Foreground = "black";
+
         manPageView.Buffer.TagTable.Add(highlightTag);
 
         LoadPrograms();
