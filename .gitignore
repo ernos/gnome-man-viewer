@@ -34,8 +34,8 @@ artifacts/
 .dotnet/
 
 # VS Code
-.vscode/
-*.code-workspace
+*.code-workspac
+.github
 
 # IDE
 .idea/
@@ -46,3 +46,4 @@ artifacts/
 # OS
 .DS_Store
 Thumbs.db
+
