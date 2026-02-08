@@ -19,7 +19,11 @@ A graphical man page viewer for Linux/X11 environments, written in C# using GTK#
 * **GTK+ 3.0 libraries** - for X11 graphical interface
 * **man command-line utility** - standard on Linux systems
 
-## Installation
+<details>
+
+<summary>
+## Installation 
+</summary>
 
 ### Linux (Ubuntu/Debian)
 
@@ -206,6 +210,11 @@ gman ls
 # Auto-load a man page and search for a term
 gman ls -s malloc
 ```
+
+
+</details>
+
+
 
 ### Context-Aware Search
 
