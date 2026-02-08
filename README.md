@@ -15,12 +15,21 @@ A graphical man page viewer for Linux/X11 environments, written in C# using GTK#
 
 ## Planned Future Feature Implementations
 
-*`Settings`**System-wide installation** - *copy link to user bin path and create .desktop launcher*
-*`Settings`**Save window state and size**
-*`Settings`**Transparent background** - *would be useful to be able to see terminal aswell*
-*`Settings`**Dark mode option**
-*`Improved Text Search`**Buttons for jumping to next or previous match
-*`Improved Text Search`**Support for regex search and highlighting
+### Settings Configuration Window amd Button
+
+* **System-wide installation** - *copy link to user bin path and create .desktop launcher*
+* **Save window state and size**
+* **Transparent background** - *would be useful to be able to see terminal aswell*
+* **Dark mode option**
+
+### Improved search bar and algorithm
+
+* **Next/Previous**: *Buttons for jumping to next or previous match*
+* **Support for Regular Expressions**: *Support for regex search and highlighting*
+
+### **Not Decided yet**
+
+* **Command text scratch pad**: For creating complex commands while you still have the man page visible. You can also check other commands and write down complex combinations of commands and scripts
 
 ## Changelog and release information
 
