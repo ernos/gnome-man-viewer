@@ -30,15 +30,6 @@
                 <property name="fill">True</property>
               </packing>
             </child>
-            <child>
-              <object class="GtkButton" id="aboutButton">
-                <property name="label">About</property>
-              </object>
-              <packing>
-                <property name="expand">False</property>
-                <property name="fill">False</property>
-              </packing>
-            </child>
           </object>
           <packing>
             <property name="expand">False</property>
