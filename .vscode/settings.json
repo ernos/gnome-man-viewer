@@ -1,0 +1,18 @@
+{
+    "dotnet.defaultSolutionOrFolder": "${workspaceFolder}",
+    "editor.formatOnSave": true,
+    "editor.defaultFormatter": "ms-dotnettools.csharp",
+    "[csharp]": {
+        "editor.defaultFormatter": "ms-dotnettools.csharp",
+        "editor.formatOnSave": true,
+        "editor.codeActionsOnSave": {
+            "source.organizeImports": "explicit"
+        }
+    },
+    "omnisharp.enableEditorConfigSupport": true,
+    "omnisharp.enableRoslynAnalyzers": true,
+    "search.exclude": {
+        "**/bin": true,
+        "**/obj": true
+    }
+}
