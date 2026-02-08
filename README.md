@@ -13,13 +13,60 @@ A graphical man page viewer for Linux/X11 environments, written in C# using GTK#
 * **Word wrapping** and scrollable text display
 * **Status bar** for feedback on load state and search results
 
+## Planned Future Feature Implementations
+
+### Settings Configuration Window amd Button
+
+* **System-wide installation** - *copy link to user bin path and create .desktop launcher*
+* **Save window state and size**
+* **Transparent background** - *would be useful to be able to see terminal aswell*
+* **Dark mode option**
+
+### Improved search bar and algorithm
+
+* **Next/Previous**: *Buttons for jumping to next or previous match*
+* **Support for Regular Expressions**: *Support for regex search and highlighting*
+
+### **Not Decided yet**
+
+* **Command text scratch pad**: For creating complex commands while you still have the man page visible. You can also check other commands and write down complex combinations of commands and scripts
+
+## Changelog and release information
+
+### **Version 0.3**
+
+1. Added a search and highlight function within the man text.
+2.  If a man page does not exists for a bin file, it will run the bin file with ` --help` and output that instead, with a warning at the top.
+3. Added argument parsing so that user can run it from command line with the `-s` or `--search` switch to open up a man document and highlight all of the searches automatically. Example:
+ `gman nmap -s port`
+
+    **Released *2026-02-08 14:18:00***
+
+### **Version 0.2** 
+
+1. Added an about button & dialogue
+2. Single click now opens documentation in the viewer
+    **Released *2026-02-07 10:32:57***
+
+### **Version 0.1**
+
+1. First release
+
+**Released *2026-02-06 12:23:02***
+
 ## Requirements
 
 * **. NET 8 LTS or later** - [Download from microsoft.com](https://dotnet.microsoft.com/download/dotnet/8.0)
 * **GTK+ 3.0 libraries** - for X11 graphical interface
 * **man command-line utility** - standard on Linux systems
 
-## Installation
+## Installation Instructions
+
+<details>
+
+<summary>
+Linux installation instructions
+</summary>
 
 ### Linux (Ubuntu/Debian)
 
@@ -46,6 +93,43 @@ dotnet run
 ./bin/Release/net8.0/gman
 ```
 
+**Make a launcher(wayland):**
+
+This is needed for the ubuntu dock and launcher to display the program with the correct icon.
+
+Create file `gman.desktop` :
+
+```
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=GMan
+Comment=GTK# Man Page Viewer
+Exec=/home/peb/projects/gman/bin/Release/net8.0/gman
+Icon=/home/peb/projects/gman/ui/icon_128.png
+Terminal=false
+Categories=Utility;Development;Documentation;
+Keywords=man;manual;documentation;help;
+StartupWMClass=gman
+```
+
+***Don't forget to update both Exec and Icon paths to match yours***
+
+```
+# Make the desktop file executable
+chmod +x gman.desktop
+
+# Copy to your local applications folder
+mkdir -p ~/.local/share/applications
+cp gman.desktop ~/.local/share/applications/
+
+# Update the desktop database
+update-desktop-database ~/.local/share/applications/
+
+# Build release version and update the Exec path if needed
+dotnet build -c Release
+```
+
 ### Linux (Fedora/RHEL)
 
 **Prerequisites:**
@@ -70,6 +154,12 @@ dotnet run
 ./bin/Release/net8.0/gman
 ```
 
+</details>
+<details>
+
+<summary>
+MacOS installation instructions</summary>
+
 ### Linux (Arch)
 
 **Prerequisites:**
@@ -92,6 +182,13 @@ dotnet build -c Release
 dotnet run
 ./bin/Release/net8.0/gman
 ```
+
+</details>
+<details>
+
+<summary>
+Linux (Ubuntu/Devian) installation instructions
+</summary>
 
 ### macOS
 
@@ -119,6 +216,13 @@ Since GTK is primarily designed for Linux, consider using:
 * **Parallels Desktop** or **VMware Fusion** with Ubuntu
 * **Docker** with an X11 forwarding setup
 * **VirtualBox** with a Linux guest
+
+</details>
+<details>
+
+<summary>
+Windows Installation Instructions
+</summary>
 
 ### Windows
 
@@ -160,7 +264,13 @@ docker build -t gman .
 docker run -e DISPLAY=$DISPLAY -v /tmp/.X11-unix:/tmp/.X11-unix gman
 ```
 
+</details>
+
 ## Building from Source
+
+<details>
+
+<summary>Compiling and building from source code</summary>
 
 **Prerequisites:**
 
@@ -206,6 +316,10 @@ gman ls
 # Auto-load a man page and search for a term
 gman ls -s malloc
 ```
+
+</details>
+
+## Usage and Examples
 
 ### Context-Aware Search
 
@@ -304,3 +418,12 @@ This project was created as a learning exercise to transfer GUI development skil
 ## License
 
 MIT
+
+## Credits and information form author
+
+I know C# seems like a strange choice when building an application for Linux using GTK. However, I want to give you my reasoning for this anand it's really because I am trying to showcase my skills and proficiency in C# since that is the largest market and has the most jobs on offer. I'm i between jobs now and this is my first ever C# application, having mostly worked in C/C++/Full-Stack and most recently in Android development with Kotlin. Check out my portfolio website for other applications or to get in contact with me!
+
+* Portfolio: https://www.yourdev.net - *My portfolio right now mostly of Android Applications*
+
+* Blog: https://www.yourdev.net/blog.php -
+    *My blog where i write programming tutorials and other tech related stuff.*

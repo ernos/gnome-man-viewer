@@ -1,0 +1,11 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=GMan
+Comment=GTK# Man Page Viewer
+Exec=/home/peb/projects/gman/bin/Release/net8.0/gman
+Icon=/home/peb/projects/gman/ui/icon_128.png
+Terminal=false
+Categories=Utility;Development;Documentation;
+Keywords=man;manual;documentation;help;
+StartupWMClass=gman

@@ -8,7 +8,18 @@ class Program
     static void Main(string[] args)
     {
         Application.Init();
-        
+
+        // Set default icon for all windows
+        try
+        {
+            string iconPath = System.IO.Path.Combine(AppContext.BaseDirectory, "ui", "icon_128.png");
+            if (System.IO.File.Exists(iconPath))
+            {
+                Gtk.Window.SetDefaultIconFromFile(iconPath);
+            }
+        }
+        catch { /* Icon loading failed, continue without icon */ }
+
         var (programName, searchTerm) = ParseArguments(args);
         var window = new MainWindow(programName, searchTerm);
         window.ShowAll();
