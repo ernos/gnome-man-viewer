@@ -4,48 +4,48 @@ This document explains how the GTK# application is structured, how the UI is bui
 
 ## Quick Overview
 
-- The UI is defined in [ui/main_window.ui](ui/main_window.ui).
-- The UI file is loaded at runtime by [MainWindow.cs](MainWindow.cs).
-- Widget references are fetched by ID and wired to C# event handlers.
-- Program list filtering happens in memory as the user types.
-- Man pages are loaded by running the system `man` command.
-- Search within loaded man pages highlights all matches in yellow.
-- If no man page exists, the app falls back to showing `program --help` output.
+* The UI is defined in [ui/main_window.ui](ui/main_window.ui).
+* The UI file is loaded at runtime by [MainWindow.cs](MainWindow.cs).
+* Widget references are fetched by ID and wired to C# event handlers.
+* Program list filtering happens in memory as the user types.
+* Man pages are loaded by running the system `man` command.
+* Search within loaded man pages highlights all matches in yellow.
+* If no man page exists, the app falls back to showing `program --help` output.
 
 ## Project Layout
 
-- [Program.cs](Program.cs): Application entry point, initializes GTK, parses CLI arguments.
-- [MainWindow.cs](MainWindow.cs): Loads the UI, wires events, contains app logic.
-- [ui/main_window.ui](ui/main_window.ui): UI definition built with Glade/Cambalache.
-- [gman.csproj](gman.csproj): Project file, includes UI file as content.
+* [Program.cs](Program.cs): Application entry point, initializes GTK, parses CLI arguments.
+* [MainWindow.cs](MainWindow.cs): Loads the UI, wires events, contains app logic.
+* [ui/main_window.ui](ui/main_window.ui): UI definition built with Glade/Cambalache.
+* [gman.csproj](gman.csproj): Project file, includes UI file as content.
 
 ## GTK Mental Model (MVVM Mapping)
 
 GTK is not MVVM by default, but you can map the ideas:
 
-- View: the .ui file (similar to an Android XML layout).
-- Code-behind (MainWindow): plays the role of a simple ViewModel + Controller.
-- Model: the list of programs and the man page content.
+* View: the .ui file (similar to an Android XML layout).
+* Code-behind (MainWindow): plays the role of a simple ViewModel + Controller.
+* Model: the list of programs and the man page content.
 
 This project uses a straightforward code-behind approach:
 
-- UI is loaded from the .ui file.
-- C# code gets widget references by ID.
-- Event handlers update the in-memory model and update view widgets.
+* UI is loaded from the .ui file.
+* C# code gets widget references by ID.
+* Event handlers update the in-memory model and update view widgets.
 
 If you want a stricter MVVM pattern later, you can:
 
-- Move filtering and man loading into a separate class.
-- Expose observable properties.
-- Update the view by binding or by a small adapter layer.
+* Move filtering and man loading into a separate class.
+* Expose observable properties.
+* Update the view by binding or by a small adapter layer.
 
 ## How the UI Is Loaded
 
-In [MainWindow.cs](MainWindow.cs), the UI is loaded with `Gtk.Builder`:
+In [MainWindow.cs](MainWindow.cs), the UI is loaded with `Gtk.Builder` :
 
-- `builder.AddFromFile(...)` loads the .ui file.
-- `builder.GetObject("widgetId")` returns widget instances.
-- The code wires signals (e.g., `searchEntry.Changed`) to methods.
+* `builder.AddFromFile(...)` loads the .ui file.
+* `builder.GetObject("widgetId")` returns widget instances.
+* The code wires signals (e.g.,  `searchEntry.Changed`) to methods.
 
 The UI file is copied to the build output folder via [gman.csproj](gman.csproj), so `dotnet run` works out of the box.
 
@@ -55,6 +55,7 @@ The UI has three main areas:
 
 1. Search row at the top
    - `searchEntry` (GtkEntry) - context-aware: filters programs OR searches man page text
+   - `aboutButton` (GtkButton) - opens the About dialog
 
 2. Split view in the middle (GtkPaned)
    - Left: `programListView` (GtkTreeView) inside a scrolled window
@@ -69,33 +70,33 @@ These widget IDs must stay stable because the C# code looks them up by name.
 
 ### Startup
 
-- `Program.cs` parses command-line arguments (see CLI Args section below).
-- `MainWindow` loads the UI and sets up event handlers.
-- The program list is collected from common bin directories.
-- The list is loaded into a `Gtk.ListStore` and shown in the TreeView.
-- If a program was passed on CLI, it is auto-loaded.
-- If a search term was passed on CLI, it is auto-searched within that program.
+* `Program.cs` parses command-line arguments (see CLI Args section below).
+* `MainWindow` loads the UI and sets up event handlers.
+* The program list is collected from common bin directories.
+* The list is loaded into a `Gtk.ListStore` and shown in the TreeView.
+* If a program was passed on CLI, it is auto-loaded.
+* If a search term was passed on CLI, it is auto-searched within that program.
 
 ### Typing in the Search Box (Context-Aware)
 
 When no man page is loaded:
-- The `searchEntry.Changed` event fires on every edit.
-- The code filters `allPrograms` in memory (case-insensitive substring match).
-- The `ListStore` is cleared and repopulated with matching programs.
-- The status bar shows match count.
+* The `searchEntry.Changed` event fires on every edit.
+* The code filters `allPrograms` in memory (case-insensitive substring match).
+* The `ListStore` is cleared and repopulated with matching programs.
+* The status bar shows match count.
 
 When a man page is loaded:
-- The `searchEntry.Changed` triggers `SearchInManPage()`.
-- All occurrences of the search term are highlighted with yellow background.
-- The view scrolls to the first match.
-- The status bar shows total match count.
+* The `searchEntry.Changed` triggers `SearchInManPage()`.
+* All occurrences of the search term are highlighted with yellow background.
+* The view scrolls to the first match.
+* The status bar shows total match count.
 
-### Selecting a Program (Double-Click)
+### Selecting a Program (Single-Click)
 
-- Double-clicking a row in `programListView` triggers `RowActivated`.
-- The selected program name is used to load its manual page.
-- Search box is cleared for the new page.
-- The app is now in "man page loaded" state, so typing will search the page.
+* Single-clicking a row in `programListView` triggers `Selection.Changed`.
+* The selected program name is used to load its manual page.
+* Search box is cleared for the new page.
+* The app is now in "man page loaded" state, so typing will search the page.
 
 ### Loading a Man Page
 
@@ -106,6 +107,11 @@ When a man page is loaded:
    - If help is available, it is displayed with a warning banner at the top.
    - If neither exists, an error message is shown.
 5. The search state is reset.
+
+### About Dialog
+
+* Click **About** to open a standard GTK About dialog.
+* The dialog shows version, author, email, and website details.
 
 ## Command-Line Arguments
 
@@ -133,9 +139,9 @@ gman ls -s "file descriptor"
 
 **Parsing Logic (in Program.cs):**
 
-- First positional (non-option) argument is the program name.
-- `-s` or `--search` followed by a value sets the search term.
-- Search term only takes effect if a program name was provided.
+* First positional (non-option) argument is the program name.
+* `-s` or `--search` followed by a value sets the search term.
+* Search term only takes effect if a program name was provided.
 
 **Sequence on Startup:**
 1. Parse CLI args.
@@ -176,6 +182,7 @@ TextTags are GTK's way of applying formatting to ranges of text. Unlike HTML/CSS
 
 1. Install Glade:
    - Ubuntu/Debian: `sudo apt-get install glade`
+
 2. Open the UI file:
    - File -> Open -> [ui/main_window.ui](ui/main_window.ui)
 3. Make changes, then save.
@@ -184,20 +191,23 @@ TextTags are GTK's way of applying formatting to ranges of text. Unlike HTML/CSS
 
 1. Install Cambalache:
    - Ubuntu/Debian: `sudo apt-get install cambalache`
+
 2. Open the UI file:
    - File -> Open -> [ui/main_window.ui](ui/main_window.ui)
 3. Edit and save.
 
 ### Important Notes When Editing
 
-- Keep the widget IDs the same unless you also update [MainWindow.cs](MainWindow.cs).
-- The IDs used by code are:
-  - `mainWindow`
-  - `searchEntry`
-  - `programListView`
-  - `manPageView`
-  - `statusLabel`
-- Changing layout is safe; changing IDs requires code updates.
+* Keep the widget IDs the same unless you also update [MainWindow.cs](MainWindow.cs).
+* The IDs used by code are:
+  + `mainWindow`
+  + `searchEntry`
+   - `aboutButton`
+
+  + `programListView`
+  + `manPageView`
+  + `statusLabel`
+* Changing layout is safe; changing IDs requires code updates.
 
 ## Building and Running (Dev)
 
@@ -221,18 +231,18 @@ dotnet run -- ls -s malloc
 
 If you see a UI loading error, check:
 
-- [gman.csproj](gman.csproj) includes `ui/main_window.ui` as content.
-- The file exists at [ui/main_window.ui](ui/main_window.ui).
+* [gman.csproj](gman.csproj) includes `ui/main_window.ui` as content.
+* The file exists at [ui/main_window.ui](ui/main_window.ui).
 
 ### No Programs Listed
 
 The app scans these paths:
 
-- `/bin`
-- `/usr/bin`
-- `/usr/local/bin`
-- `/sbin`
-- `/usr/sbin`
+* `/bin`
+* `/usr/bin`
+* `/usr/local/bin`
+* `/sbin`
+* `/usr/sbin`
 
 If none of those exist or are accessible, the list will be empty.
 
@@ -242,16 +252,15 @@ The app will try `program --help` if the man page doesn't exist. If the program 
 
 ### Search Doesn't Find Text
 
-- Search is case-insensitive, so any casing should match.
-- Make sure a man page or help text is actually loaded (status bar shows "Displaying").
-- Some programs output special formatting characters that may affect searching.
+* Search is case-insensitive, so any casing should match.
+* Make sure a man page or help text is actually loaded (status bar shows "Displaying").
+* Some programs output special formatting characters that may affect searching.
 
 ## Future Improvements
 
-- Use a background task to load programs without blocking the UI.
-- Add section selection (e.g., `man 2 open` vs `man 3 open`).
-- Add persistent favorites and history.
-- Introduce a ViewModel layer for testability.
-- Add regex search support.
-- Add case-sensitive toggle in UI.
-
+* Use a background task to load programs without blocking the UI.
+* Add section selection (e.g.,  `man 2 open` vs `man 3 open`).
+* Add persistent favorites and history.
+* Introduce a ViewModel layer for testability.
+* Add regex search support.
+* Add case-sensitive toggle in UI.
