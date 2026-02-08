@@ -93,6 +93,43 @@ dotnet run
 ./bin/Release/net8.0/gman
 ```
 
+**Make a launcher(wayland):**
+
+This is needed for the ubuntu dock and launcher to display the program with the correct icon.
+
+Create file `gman.desktop` :
+
+```
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=GMan
+Comment=GTK# Man Page Viewer
+Exec=/home/peb/projects/gman/bin/Release/net8.0/gman
+Icon=/home/peb/projects/gman/ui/icon_128.png
+Terminal=false
+Categories=Utility;Development;Documentation;
+Keywords=man;manual;documentation;help;
+StartupWMClass=gman
+```
+
+***Don't forget to update both Exec and Icon paths to match yours***
+
+```
+# Make the desktop file executable
+chmod +x gman.desktop
+
+# Copy to your local applications folder
+mkdir -p ~/.local/share/applications
+cp gman.desktop ~/.local/share/applications/
+
+# Update the desktop database
+update-desktop-database ~/.local/share/applications/
+
+# Build release version and update the Exec path if needed
+dotnet build -c Release
+```
+
 ### Linux (Fedora/RHEL)
 
 **Prerequisites:**
