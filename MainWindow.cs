@@ -14,9 +14,13 @@ public class MainWindow
     private readonly Label statusLabel;
     private readonly TreeView programListView;
     private readonly ListStore programStore;
+    private TextTag highlightTag;
     private List<string> allPrograms = new();
+    private bool isManPageLoaded = false;
+    private string? currentLoadedProgram;
+    private string? lastSearchTerm;
 
-    public MainWindow()
+    public MainWindow(string? autoLoadProgram = null, string? autoSearchTerm = null)
     {
         var builder = new Builder();
         builder.AddFromFile(GetUiPath());
@@ -49,7 +53,22 @@ public class MainWindow
         manPageView.Editable = false;
         manPageView.WrapMode = WrapMode.Word;
 
+        // Create highlight tag for search matches
+        highlightTag = new TextTag("highlight");
+        highlightTag.Background = "yellow";
+        manPageView.Buffer.TagTable.Add(highlightTag);
+
         LoadPrograms();
+
+        // Handle CLI arguments
+        if (!string.IsNullOrEmpty(autoLoadProgram))
+        {
+            LoadManPage(autoLoadProgram);
+            if (!string.IsNullOrEmpty(autoSearchTerm))
+            {
+                searchEntry.Text = autoSearchTerm;
+            }
+        }
     }
 
     public void ShowAll()
@@ -85,8 +104,27 @@ public class MainWindow
 
     private void OnSearchTextChanged(object? sender, EventArgs e)
     {
-        string query = searchEntry.Text.Trim().ToLower();
-        RefreshProgramList(query);
+        string query = searchEntry.Text.Trim();
+
+        if (isManPageLoaded)
+        {
+            // Man page is loaded: search within the page
+            if (string.IsNullOrEmpty(query))
+            {
+                ClearSearchHighlights();
+                statusLabel.Text = $"Displaying: {currentLoadedProgram}";
+            }
+            else
+            {
+                SearchInManPage(query);
+            }
+        }
+        else
+        {
+            // No man page loaded: filter program list
+            string lowerQuery = query.ToLower();
+            RefreshProgramList(lowerQuery);
+        }
     }
 
     private void RefreshProgramList(string filter)
@@ -123,23 +161,54 @@ public class MainWindow
         try
         {
             statusLabel.Text = $"Loading man page for '{pageName}'...";
+            
+            // Try to get man page content
             string manContent = GetManPageContent(pageName);
 
             if (string.IsNullOrEmpty(manContent))
             {
-                statusLabel.Text = $"No man page found for '{pageName}'";
-                manPageView.Buffer.Text = $"No manual entry for {pageName}";
+                // Man page not found, try --help
+                string helpContent = GetHelpContent(pageName);
+
+                if (string.IsNullOrEmpty(helpContent))
+                {
+                    // No help available either
+                    statusLabel.Text = $"Error: No manual entry for '{pageName}' and no help available";
+                    manPageView.Buffer.Text = $"No manual entry for {pageName}";
+                    isManPageLoaded = false;
+                    currentLoadedProgram = null;
+                }
+                else
+                {
+                    // Show help with warning banner
+                    string warningBanner = $"⚠️  WARNING: No man page found for '{pageName}'\n" +
+                                          "Showing output from 'program --help' instead.\n" +
+                                          "────────────────────────────────────────────\n\n";
+                    manPageView.Buffer.Text = warningBanner + helpContent;
+                    statusLabel.Text = $"Displaying help for: {pageName}";
+                    isManPageLoaded = true;
+                    currentLoadedProgram = pageName;
+                }
             }
             else
             {
+                // Man page found
                 manPageView.Buffer.Text = manContent;
                 statusLabel.Text = $"Displaying: {pageName}";
+                isManPageLoaded = true;
+                currentLoadedProgram = pageName;
             }
+
+            // Clear search state when loading a new page
+            searchEntry.Text = "";
+            lastSearchTerm = null;
         }
         catch (Exception ex)
         {
             statusLabel.Text = $"Error: {ex.Message}";
             manPageView.Buffer.Text = $"Error loading man page: {ex.Message}";
+            isManPageLoaded = false;
+            currentLoadedProgram = null;
         }
     }
 
@@ -165,6 +234,74 @@ public class MainWindow
         {
             return string.Empty;
         }
+    }
+
+    private string GetHelpContent(string programName)
+    {
+        try
+        {
+            var process = new System.Diagnostics.Process();
+            process.StartInfo.FileName = programName;
+            process.StartInfo.Arguments = "--help";
+            process.StartInfo.UseShellExecute = false;
+            process.StartInfo.RedirectStandardOutput = true;
+            process.StartInfo.RedirectStandardError = true;
+            process.StartInfo.CreateNoWindow = true;
+
+            process.Start();
+            string output = process.StandardOutput.ReadToEnd();
+            process.WaitForExit();
+
+            return output;
+        }
+        catch (Exception)
+        {
+            return string.Empty;
+        }
+    }
+
+    private void SearchInManPage(string searchTerm)
+    {
+        ClearSearchHighlights();
+        lastSearchTerm = searchTerm;
+
+        TextBuffer buffer = manPageView.Buffer;
+        string searchLower = searchTerm.ToLower();
+
+        int matchCount = 0;
+        bool firstMatch = true;
+
+        TextIter iter = buffer.StartIter;
+        TextIter endIter = buffer.EndIter;
+        
+        while (iter.ForwardSearch(searchLower, 0, out TextIter matchStart, out TextIter matchEnd, endIter))
+        {
+            buffer.ApplyTag(highlightTag, matchStart, matchEnd);
+            matchCount++;
+
+            if (firstMatch)
+            {
+                manPageView.ScrollToIter(matchStart, 0.1, false, 0, 0);
+                firstMatch = false;
+            }
+
+            iter = matchEnd;
+        }
+
+        if (matchCount == 0)
+        {
+            statusLabel.Text = $"No matches found for '{searchTerm}'";
+        }
+        else
+        {
+            statusLabel.Text = $"Found {matchCount} match(es) for '{searchTerm}' in {currentLoadedProgram}";
+        }
+    }
+
+    private void ClearSearchHighlights()
+    {
+        TextBuffer buffer = manPageView.Buffer;
+        buffer.RemoveTag(highlightTag, buffer.StartIter, buffer.EndIter);
     }
 
     private void OnDeleteEvent(object? sender, DeleteEventArgs args)

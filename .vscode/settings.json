@@ -14,5 +14,8 @@
     "search.exclude": {
         "**/bin": true,
         "**/obj": true
+    },
+    "[markdown]": {
+        "editor.defaultFormatter": "mervin.markdown-formatter"
     }
 }

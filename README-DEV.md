@@ -9,10 +9,12 @@ This document explains how the GTK# application is structured, how the UI is bui
 - Widget references are fetched by ID and wired to C# event handlers.
 - Program list filtering happens in memory as the user types.
 - Man pages are loaded by running the system `man` command.
+- Search within loaded man pages highlights all matches in yellow.
+- If no man page exists, the app falls back to showing `program --help` output.
 
 ## Project Layout
 
-- [Program.cs](Program.cs): Application entry point, initializes GTK, creates the window.
+- [Program.cs](Program.cs): Application entry point, initializes GTK, parses CLI arguments.
 - [MainWindow.cs](MainWindow.cs): Loads the UI, wires events, contains app logic.
 - [ui/main_window.ui](ui/main_window.ui): UI definition built with Glade/Cambalache.
 - [gman.csproj](gman.csproj): Project file, includes UI file as content.
@@ -52,14 +54,14 @@ The UI file is copied to the build output folder via [gman.csproj](gman.csproj),
 The UI has three main areas:
 
 1. Search row at the top
-   - `searchEntry` (GtkEntry)
+   - `searchEntry` (GtkEntry) - context-aware: filters programs OR searches man page text
 
 2. Split view in the middle (GtkPaned)
    - Left: `programListView` (GtkTreeView) inside a scrolled window
    - Right: `manPageView` (GtkTextView) inside a scrolled window
 
 3. Status label at the bottom
-   - `statusLabel` (GtkLabel)
+   - `statusLabel` (GtkLabel) - shows load state, search results, or error messages
 
 These widget IDs must stay stable because the C# code looks them up by name.
 
@@ -67,21 +69,106 @@ These widget IDs must stay stable because the C# code looks them up by name.
 
 ### Startup
 
+- `Program.cs` parses command-line arguments (see CLI Args section below).
 - `MainWindow` loads the UI and sets up event handlers.
 - The program list is collected from common bin directories.
 - The list is loaded into a `Gtk.ListStore` and shown in the TreeView.
+- If a program was passed on CLI, it is auto-loaded.
+- If a search term was passed on CLI, it is auto-searched within that program.
 
-### Typing in the Search Box
+### Typing in the Search Box (Context-Aware)
 
+When no man page is loaded:
 - The `searchEntry.Changed` event fires on every edit.
-- The code filters `allPrograms` in memory.
-- The `ListStore` is cleared and repopulated.
+- The code filters `allPrograms` in memory (case-insensitive substring match).
+- The `ListStore` is cleared and repopulated with matching programs.
+- The status bar shows match count.
 
-### Selecting a Program
+When a man page is loaded:
+- The `searchEntry.Changed` triggers `SearchInManPage()`.
+- All occurrences of the search term are highlighted with yellow background.
+- The view scrolls to the first match.
+- The status bar shows total match count.
 
-- Double-clicking a row triggers `RowActivated`.
-- The selected program name is used to run `man <program>`.
-- The output is put into the `TextView` buffer.
+### Selecting a Program (Double-Click)
+
+- Double-clicking a row in `programListView` triggers `RowActivated`.
+- The selected program name is used to load its manual page.
+- Search box is cleared for the new page.
+- The app is now in "man page loaded" state, so typing will search the page.
+
+### Loading a Man Page
+
+1. `LoadManPage(string programName)` is called.
+2. It attempts to fetch the man page with: `man <programName>`.
+3. If successful, the page is displayed and `isManPageLoaded = true`.
+4. If the man page doesn't exist, the app tries: `<programName> --help`.
+   - If help is available, it is displayed with a warning banner at the top.
+   - If neither exists, an error message is shown.
+5. The search state is reset.
+
+## Command-Line Arguments
+
+The app supports optional command-line arguments:
+
+```bash
+gman [program-name] [-s|--search search-term]
+```
+
+**Examples:**
+
+```bash
+# No arguments: show the program list
+gman
+
+# Auto-load a man page
+gman ls
+
+# Load a man page and auto-search for a term
+gman ls -s malloc
+
+# Search for lowercase search terms works too
+gman ls -s "file descriptor"
+```
+
+**Parsing Logic (in Program.cs):**
+
+- First positional (non-option) argument is the program name.
+- `-s` or `--search` followed by a value sets the search term.
+- Search term only takes effect if a program name was provided.
+
+**Sequence on Startup:**
+1. Parse CLI args.
+2. Create MainWindow with parsed program name and search term.
+3. MainWindow loads programs and UI.
+4. If program name is provided, auto-load that man page.
+5. If search term is provided, auto-search within the loaded page.
+
+## Text Highlighting & Search
+
+### TextTag for Highlighting
+
+In [MainWindow.cs](MainWindow.cs), a `TextTag` named "highlight" is created with a yellow background:
+
+```csharp
+highlightTag = new TextTag("highlight");
+highlightTag.Background = "yellow";
+manPageView.Buffer.TagTable.Add(highlightTag);
+```
+
+TextTags are GTK's way of applying formatting to ranges of text. Unlike HTML/CSS, they are applied programmatically to character ranges in the buffer.
+
+### Search Algorithm
+
+`SearchInManPage()` does the following:
+
+1. Clears any previous highlights.
+2. Converts search term to lowercase.
+3. Iterates through the buffer using `TextIter.ForwardSearch()`.
+   - Searches are case-insensitive.
+   - Each match is tagged with the highlight tag.
+4. Scrolls to the first match.
+5. Updates the status bar with match count.
 
 ## Editing the UI With Glade or Cambalache
 
@@ -122,6 +209,12 @@ dotnet build
 dotnet run
 ```
 
+With arguments:
+
+```bash
+dotnet run -- ls -s malloc
+```
+
 ## Troubleshooting
 
 ### UI File Not Found
@@ -143,9 +236,15 @@ The app scans these paths:
 
 If none of those exist or are accessible, the list will be empty.
 
-### Man Page Not Found
+### Man Page Not Found, Help Used Instead
 
-Some programs do not have man pages. The app will show a friendly error and keep running.
+The app will try `program --help` if the man page doesn't exist. If the program takes no `--help` argument, the app will show an error.
+
+### Search Doesn't Find Text
+
+- Search is case-insensitive, so any casing should match.
+- Make sure a man page or help text is actually loaded (status bar shows "Displaying").
+- Some programs output special formatting characters that may affect searching.
 
 ## Future Improvements
 
@@ -153,3 +252,6 @@ Some programs do not have man pages. The app will show a friendly error and keep
 - Add section selection (e.g., `man 2 open` vs `man 3 open`).
 - Add persistent favorites and history.
 - Introduce a ViewModel layer for testability.
+- Add regex search support.
+- Add case-sensitive toggle in UI.
+
