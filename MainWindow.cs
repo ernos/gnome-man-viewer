@@ -105,6 +105,7 @@ public class MainWindow
 
     private void LoadPrograms()
     {
+        //TODO Make this configurable in settin
         var paths = new[] { "/bin", "/usr/bin", "/usr/local/bin", "/sbin", "/usr/sbin" };
         var programs = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
 
