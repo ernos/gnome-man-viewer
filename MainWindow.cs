@@ -15,12 +15,17 @@ public class MainWindow
     private readonly Label statusLabel;
     private readonly TreeView programListView;
     private readonly Button aboutButton;
+    private readonly Button nextButton;
+    private readonly Button previousButton;
     private readonly ListStore programStore;
     private TextTag highlightTag;
+    private TextTag currentMatchTag;
     private List<string> allPrograms = new();
     private bool isManPageLoaded = false;
     private string? currentLoadedProgram;
     private string? lastSearchTerm;
+    private List<(TextIter start, TextIter end)> searchMatches = new();
+    private int currentMatchIndex = -1;
 
     public MainWindow(string? autoLoadProgram = null, string? autoSearchTerm = null)
     {
@@ -33,8 +38,10 @@ public class MainWindow
         manPageView = (TextView)builder.GetObject("manPageView");
         statusLabel = (Label)builder.GetObject("statusLabel");
         aboutButton = (Button)builder.GetObject("aboutButton");
+        nextButton = (Button)builder.GetObject("nextButton");
+        previousButton = (Button)builder.GetObject("previousButton");
 
-        if (mainWindow == null || searchEntry == null || programListView == null || manPageView == null || statusLabel == null || aboutButton == null)
+        if (mainWindow == null || searchEntry == null || programListView == null || manPageView == null || statusLabel == null || aboutButton == null || nextButton == null || previousButton == null)
         {
             throw new InvalidOperationException("Failed to load UI from main_window.ui");
         }
@@ -61,7 +68,10 @@ public class MainWindow
 
         mainWindow.DeleteEvent += OnDeleteEvent;
         searchEntry.Changed += OnSearchTextChanged;
+        searchEntry.KeyPressEvent += OnSearchEntryKeyPress;
         aboutButton.Clicked += OnAboutClicked;
+        nextButton.Clicked += OnNextClicked;
+        previousButton.Clicked += OnPreviousClicked;
 
         programStore = new ListStore(typeof(string));
         programListView.Model = programStore;
@@ -82,8 +92,13 @@ public class MainWindow
         highlightTag = new TextTag("highlight");
         highlightTag.Background = "yellow";
         highlightTag.Foreground = "black";
-
         manPageView.Buffer.TagTable.Add(highlightTag);
+
+        // Create highlight tag for the current/selected match
+        currentMatchTag = new TextTag("currentMatch");
+        currentMatchTag.Background = "orange";
+        currentMatchTag.Foreground = "black";
+        manPageView.Buffer.TagTable.Add(currentMatchTag);
 
         LoadPrograms();
 
@@ -242,6 +257,10 @@ public class MainWindow
             // Clear search state when loading a new page
             searchEntry.Text = "";
             lastSearchTerm = null;
+            searchMatches.Clear();
+            currentMatchIndex = -1;
+            nextButton.Sensitive = false;
+            previousButton.Sensitive = false;
         }
         catch (Exception ex)
         {
@@ -304,37 +323,91 @@ public class MainWindow
     {
         ClearSearchHighlights();
         lastSearchTerm = searchTerm;
+        searchMatches.Clear();
+        currentMatchIndex = -1;
 
         TextBuffer buffer = manPageView.Buffer;
         string searchLower = searchTerm.ToLower();
-
-        int matchCount = 0;
-        bool firstMatch = true;
 
         TextIter iter = buffer.StartIter;
         TextIter endIter = buffer.EndIter;
         
         while (iter.ForwardSearch(searchLower, 0, out TextIter matchStart, out TextIter matchEnd, endIter))
         {
-            buffer.ApplyTag(highlightTag, matchStart, matchEnd);
-            matchCount++;
-
-            if (firstMatch)
-            {
-                manPageView.ScrollToIter(matchStart, 0.1, false, 0, 0);
-                firstMatch = false;
-            }
-
+            searchMatches.Add((matchStart, matchEnd));
             iter = matchEnd;
         }
+
+        int matchCount = searchMatches.Count;
 
         if (matchCount == 0)
         {
             statusLabel.Text = $"No matches found for '{searchTerm}'";
+            nextButton.Sensitive = false;
+            previousButton.Sensitive = false;
         }
         else
         {
-            statusLabel.Text = $"Found {matchCount} match(es) for '{searchTerm}' in {currentLoadedProgram}";
+            // Highlight all matches and navigate to first
+            foreach (var (start, end) in searchMatches)
+            {
+                buffer.ApplyTag(highlightTag, start, end);
+            }
+            NavigateToMatch(0);
+            statusLabel.Text = $"Match 1 of {matchCount} for '{searchTerm}' in {currentLoadedProgram}";
+            nextButton.Sensitive = true;
+            previousButton.Sensitive = true;
+        }
+    }
+
+    private void NavigateToMatch(int index)
+    {
+        if (searchMatches.Count == 0 || index < 0 || index >= searchMatches.Count)
+            return;
+
+        // Remove currentMatchTag from previous match if any
+        if (currentMatchIndex >= 0 && currentMatchIndex < searchMatches.Count)
+        {
+            var (oldStart, oldEnd) = searchMatches[currentMatchIndex];
+            manPageView.Buffer.RemoveTag(currentMatchTag, oldStart, oldEnd);
+        }
+
+        currentMatchIndex = index;
+        var (start, end) = searchMatches[index];
+        manPageView.Buffer.ApplyTag(currentMatchTag, start, end);
+        manPageView.ScrollToIter(start, 0.1, false, 0, 0);
+        
+        string searchTerm = lastSearchTerm ?? "";
+        statusLabel.Text = $"Match {index + 1} of {searchMatches.Count} for '{searchTerm}' in {currentLoadedProgram}";
+    }
+
+    private void OnNextClicked(object? sender, EventArgs e)
+    {
+        if (searchMatches.Count == 0)
+            return;
+
+        int nextIndex = (currentMatchIndex + 1) % searchMatches.Count;
+        NavigateToMatch(nextIndex);
+    }
+
+    private void OnPreviousClicked(object? sender, EventArgs e)
+    {
+        if (searchMatches.Count == 0)
+            return;
+
+        int prevIndex = currentMatchIndex - 1;
+        if (prevIndex < 0)
+            prevIndex = searchMatches.Count - 1;
+        NavigateToMatch(prevIndex);
+    }
+
+    [GLib.ConnectBefore]
+    private void OnSearchEntryKeyPress(object? sender, KeyPressEventArgs args)
+    {
+        if (args.Event.Key == Gdk.Key.Return)
+        {
+            OnNextClicked(null, EventArgs.Empty);
+            args.RetVal = true;
         }
     }
 
@@ -342,6 +415,7 @@ public class MainWindow
     {
         TextBuffer buffer = manPageView.Buffer;
         buffer.RemoveTag(highlightTag, buffer.StartIter, buffer.EndIter);
+        buffer.RemoveTag(currentMatchTag, buffer.StartIter, buffer.EndIter);
     }
 
     private void OnDeleteEvent(object? sender, DeleteEventArgs args)
