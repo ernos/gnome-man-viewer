@@ -6,15 +6,16 @@ namespace GMan;
 
 public class SettingsDialog
 {
-    public static (ResponseType response, bool enableHelpFallback, bool useSingleClick) ShowDialog(Window parent)
+    public static (ResponseType response, bool enableHelpFallback, bool useSingleClick, bool favoritesAtTop) ShowDialog(Window parent)
     {
         // Load current settings
         var settings = Settings.Load();
         bool enableHelpFallback = settings.EnableHelpFallback;
         bool useSingleClick = settings.UseSingleClick;
+        bool favoritesAtTop = settings.FavoritesAtTop;
 
         using var dialog = new Dialog("Settings", parent, DialogFlags.Modal | DialogFlags.DestroyWithParent);
-        dialog.SetDefaultSize(400, 250);
+        dialog.SetDefaultSize(400, 300);
 
         // Create dialog content
         var contentArea = dialog.ContentArea;
@@ -61,6 +62,26 @@ public class SettingsDialog
 
         contentArea.PackStart(clickBox, false, false, 5);
 
+        // Separator
+        contentArea.PackStart(new Separator(Orientation.Horizontal), false, false, 5);
+
+        // Favorites position option
+        var favoritesBox = new Box(Orientation.Vertical, 5);
+        var favoritesLabel = new Label("Favorites list position:");
+        favoritesLabel.Xalign = 0;
+        favoritesLabel.MarginBottom = 5;
+        favoritesBox.PackStart(favoritesLabel, false, false, 0);
+
+        var favoritesTopRadio = new RadioButton("Show favorites at top (default)");
+        favoritesTopRadio.Active = favoritesAtTop;
+        favoritesBox.PackStart(favoritesTopRadio, false, false, 0);
+
+        var favoritesBottomRadio = new RadioButton(favoritesTopRadio, "Show favorites at bottom");
+        favoritesBottomRadio.Active = !favoritesAtTop;
+        favoritesBox.PackStart(favoritesBottomRadio, false, false, 0);
+
+        contentArea.PackStart(favoritesBox, false, false, 5);
+
         // Add buttons
         dialog.AddButton("Cancel", ResponseType.Cancel);
         dialog.AddButton("Save", ResponseType.Ok);
@@ -73,18 +94,21 @@ public class SettingsDialog
         {
             enableHelpFallback = enableHelpFallbackCheck.Active;
             useSingleClick = singleClickRadio.Active;
+            favoritesAtTop = favoritesTopRadio.Active;
 
             // Save settings
             var saveSettings = new Settings
             {
                 EnableHelpFallback = enableHelpFallback,
-                UseSingleClick = useSingleClick
+                UseSingleClick = useSingleClick,
+                Favorites = settings.Favorites, // Preserve existing favorites
+                FavoritesAtTop = favoritesAtTop
             };
             saveSettings.Save();
         }
 
         dialog.Hide();
-        return (response, enableHelpFallback, useSingleClick);
+        return (response, enableHelpFallback, useSingleClick, favoritesAtTop);
     }
 }
 
@@ -99,6 +123,8 @@ public class Settings
 
     public bool EnableHelpFallback { get; set; } = false;  // Default: disabled for security
     public bool UseSingleClick { get; set; } = false;       // Default: double-click
+    public List<string> Favorites { get; set; } = new();    // Default: empty list
+    public bool FavoritesAtTop { get; set; } = true;        // Default: favorites at top
 
     public static Settings Load()
     {
@@ -115,15 +141,28 @@ public class Settings
                     if (parts.Length == 2)
                     {
                         var key = parts[0].Trim();
-                        var value = parts[1].Trim().ToLower();
+                        var value = parts[1].Trim();
 
                         switch (key)
                         {
                             case "EnableHelpFallback":
-                                settings.EnableHelpFallback = value == "true";
+                                settings.EnableHelpFallback = value.ToLower() == "true";
                                 break;
                             case "UseSingleClick":
-                                settings.UseSingleClick = value == "true";
+                                settings.UseSingleClick = value.ToLower() == "true";
+                                break;
+                            case "Favorites":
+                                // Parse comma-separated list
+                                if (!string.IsNullOrWhiteSpace(value))
+                                {
+                                    settings.Favorites = value.Split(',')
+                                        .Select(f => f.Trim())
+                                        .Where(f => !string.IsNullOrEmpty(f))
+                                        .ToList();
+                                }
+                                break;
+                            case "FavoritesAtTop":
+                                settings.FavoritesAtTop = value.ToLower() == "true";
                                 break;
                         }
                     }
@@ -145,8 +184,11 @@ public class Settings
                 Directory.CreateDirectory(dir);
             }
 
+            var favoritesString = Favorites.Count > 0 ? string.Join(",", Favorites) : "";
             var content = $"EnableHelpFallback={EnableHelpFallback}\n" +
-                         $"UseSingleClick={UseSingleClick}\n";
+                         $"UseSingleClick={UseSingleClick}\n" +
+                         $"Favorites={favoritesString}\n" +
+                         $"FavoritesAtTop={FavoritesAtTop}\n";
 
             File.WriteAllText(SettingsPath, content);
         }

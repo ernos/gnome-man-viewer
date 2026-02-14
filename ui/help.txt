@@ -1,0 +1,99 @@
+GMAN - GTK# MAN PAGE VIEWER
+
+SYNOPSIS
+    gman [program-name] [-s|--search search-term]
+    gman --help
+
+DESCRIPTION
+    GMan is a graphical man page viewer for Linux/X11 environments. It provides an intuitive interface for browsing system documentation with advanced search, favorites management, and keyboard navigation.
+
+FAVORITES MANAGEMENT
+    Press + key
+        Add the selected program to your favorites list (when in All Programs list)
+        Programs in favorites show a star icon in the All Programs list
+        Favorites are automatically saved to ~/.config/gman/settings.conf
+
+    Press - key
+        Remove the selected program from favorites (when in Favorites list)
+        Star icon disappears from All Programs list
+
+    Show/Hide Lists
+        Click checkboxes or list labels to toggle visibility
+        Drag the divider to resize the split between lists
+        Hidden lists collapse to save screen space
+        Position preference (top/bottom) configurable in Settings
+
+KEYBOARD NAVIGATION
+    Type-Ahead Search
+        Type 1-5 characters quickly (within 1 second)
+        Program list jumps to first matching program
+        Works in both Favorites and All Programs lists
+        Status bar shows what you've typed
+
+    Keyboard Shortcuts
+        + key    - Add program to favorites (All Programs list only)
+        - key    - Remove program from favorites (Favorites list only)
+        Enter    - Load man page for selected program
+        Letters  - Quick jump to matching programs
+        Return   - Jump to next search match (in search box)
+
+SEARCH FEATURES
+    Within Man Pages
+        Type in search box to highlight all matches
+        All matches highlighted in yellow background
+        Current match highlighted in orange background
+        Navigate with Previous/Next buttons or Return key
+        Status bar shows "Match X of Y"
+
+    Clickable References
+        Click blue underlined references in SEE ALSO sections
+        Example: ls(1), grep(1), find(1)
+        Automatically loads referenced man page
+        Program is selected and scrolled into view
+
+SETTINGS
+    Click the Settings button to configure:
+        - Click behavior (single-click or double-click)
+        - Help fallback (run --help when no man page exists)
+        - Favorites position (show at top or bottom)
+        - Smart filtering (show only programs with man pages)
+
+COMMAND-LINE USAGE
+    gman
+        Launch with program list
+
+    gman ls
+        Open 'ls' man page directly
+
+    gman ls -s directory
+        Open 'ls' and search for 'directory'
+
+    gman grep --search pattern
+        Open 'grep' and search for 'pattern'
+
+TOOLTIPS
+    Hover over list items to see available keyboard shortcuts
+    Status bar shows contextual hints when lists have focus
+
+SMART FILTERING
+    When "Run programs with --help" is disabled in settings:
+        - Only programs with man pages are shown
+        - Queries system man database for available pages
+        - Reduces clutter for documentation-focused usage
+
+BASH COMPLETION
+    GMan includes bash completion support for command-line usage.
+    See installation documentation for setup instructions.
+
+FILES
+    ~/.config/gman/settings.conf
+        Configuration and favorites storage
+
+VERSION
+    GMan 1.0 - February 2026
+
+AUTHOR
+    See https://www.yourdev.net for more information
+
+COPYRIGHT
+    MIT License

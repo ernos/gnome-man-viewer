@@ -17,7 +17,7 @@ at the top. If it  is checked, that list will show. If both are checked, both li
 
 When we have all of this completed and tested, we can add a right click context menu for adding or deleting a favorote item.
 
-
+Ask me any questions you might need clarity in before starting and then create an implementation plan.
 ## BUGS
 
 * **Opening of alsabat-test runs an annoying alsa sound beep test**:, if the *'run program with --help'* option is enabled.
