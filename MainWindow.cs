@@ -15,14 +15,25 @@ public class MainWindow
     private readonly Label statusLabel;
     private readonly TreeView programListView;
     private readonly Button aboutButton;
+    private readonly Button settingsButton;
     private readonly Button nextButton;
     private readonly Button previousButton;
     private readonly ListStore programStore;
+    private Settings settings;
     private TextTag highlightTag;
     private TextTag currentMatchTag;
+    private TextTag headerTag;
+    private TextTag commandTag;
+    private TextTag optionTag;
+    private TextTag argumentTag;
+    private TextTag boldTag;
+    private TextTag filePathTag;
+    private TextTag urlTag;
+    private TextTag manReferenceTag;
     private List<string> allPrograms = new();
     private bool isManPageLoaded = false;
     private string? currentLoadedProgram;
+    private Dictionary<(int start, int end), string> manPageReferences = new();
     private string? lastSearchTerm;
     private List<(TextIter start, TextIter end)> searchMatches = new();
     private int currentMatchIndex = -1;
@@ -38,10 +49,11 @@ public class MainWindow
         manPageView = (TextView)builder.GetObject("manPageView");
         statusLabel = (Label)builder.GetObject("statusLabel");
         aboutButton = (Button)builder.GetObject("aboutButton");
+        settingsButton = (Button)builder.GetObject("settingsButton");
         nextButton = (Button)builder.GetObject("nextButton");
         previousButton = (Button)builder.GetObject("previousButton");
 
-        if (mainWindow == null || searchEntry == null || programListView == null || manPageView == null || statusLabel == null || aboutButton == null || nextButton == null || previousButton == null)
+        if (mainWindow == null || searchEntry == null || programListView == null || manPageView == null || statusLabel == null || aboutButton == null || settingsButton == null || nextButton == null || previousButton == null)
         {
             throw new InvalidOperationException("Failed to load UI from main_window.ui");
         }
@@ -66,10 +78,14 @@ public class MainWindow
             Console.WriteLine($"Icon loading failed: {ex.Message}");
         }
 
+        // Load settings
+        settings = Settings.Load();
+
         mainWindow.DeleteEvent += OnDeleteEvent;
         searchEntry.Changed += OnSearchTextChanged;
         searchEntry.KeyPressEvent += OnSearchEntryKeyPress;
         aboutButton.Clicked += OnAboutClicked;
+        settingsButton.Clicked += OnSettingsClicked;
         nextButton.Clicked += OnNextClicked;
         previousButton.Clicked += OnPreviousClicked;
 
@@ -84,9 +100,16 @@ public class MainWindow
         programListView.AppendColumn(column);
         programListView.RowActivated += OnProgramSelected;
         programListView.KeyPressEvent += OnProgramListKeyPress;
+        
+        // Wire up selection handler based on settings
+        if (settings.UseSingleClick)
+        {
+            programListView.Selection.Changed += OnProgramSelectionChanged;
+        }
 
         manPageView.Editable = false;
         manPageView.WrapMode = WrapMode.Word;
+        manPageView.ButtonPressEvent += OnManPageViewClicked;
 
         // Create highlight tag for search matches
         highlightTag = new TextTag("highlight");
@@ -99,6 +122,47 @@ public class MainWindow
         currentMatchTag.Background = "orange";
         currentMatchTag.Foreground = "black";
         manPageView.Buffer.TagTable.Add(currentMatchTag);
+
+        // Create formatting tags for man pages
+        headerTag = new TextTag("header");
+        headerTag.Foreground = "#2E86AB";  // Blue
+        headerTag.Weight = Pango.Weight.Bold;
+        headerTag.Scale = 1.3;
+        manPageView.Buffer.TagTable.Add(headerTag);
+
+        commandTag = new TextTag("command");
+        commandTag.Foreground = "#A23B72";  // Purple
+        commandTag.Weight = Pango.Weight.Bold;
+        manPageView.Buffer.TagTable.Add(commandTag);
+
+        optionTag = new TextTag("option");
+        optionTag.Foreground = "#F18F01";  // Orange
+        optionTag.Weight = Pango.Weight.Bold;
+        manPageView.Buffer.TagTable.Add(optionTag);
+
+        argumentTag = new TextTag("argument");
+        argumentTag.Foreground = "#C73E1D";  // Red
+        argumentTag.Style = Pango.Style.Italic;
+        manPageView.Buffer.TagTable.Add(argumentTag);
+
+        boldTag = new TextTag("bold");
+        boldTag.Weight = Pango.Weight.Bold;
+        manPageView.Buffer.TagTable.Add(boldTag);
+
+        filePathTag = new TextTag("filePath");
+        filePathTag.Foreground = "#06A77D";  // Teal/Green
+        filePathTag.Underline = Pango.Underline.Single;
+        manPageView.Buffer.TagTable.Add(filePathTag);
+
+        urlTag = new TextTag("url");
+        urlTag.Foreground = "#0077CC";  // Blue
+        urlTag.Underline = Pango.Underline.Single;
+        manPageView.Buffer.TagTable.Add(urlTag);
+
+        manReferenceTag = new TextTag("manReference");
+        manReferenceTag.Foreground = "#0077CC";  // Blue
+        manReferenceTag.Underline = Pango.Underline.Single;
+        manPageView.Buffer.TagTable.Add(manReferenceTag);
 
         LoadPrograms();
 
@@ -202,8 +266,15 @@ public class MainWindow
 
     private void OnProgramSelectionChanged(object? sender, EventArgs e)
     {
-        // Selection changed but we don't auto-load anymore
-        // Only load when user double-clicks (RowActivated) or presses Enter
+        // This handler is only attached when single-click mode is enabled
+        if (settings.UseSingleClick && programListView.Selection.GetSelected(out TreeIter iter))
+        {
+            var program = programStore.GetValue(iter, 0)?.ToString();
+            if (!string.IsNullOrEmpty(program) && !string.Equals(program, currentLoadedProgram, StringComparison.OrdinalIgnoreCase))
+            {
+                LoadManPage(program);
+            }
+        }
     }
 
     private void LoadManPage(string pageName)
@@ -217,7 +288,18 @@ public class MainWindow
 
             if (string.IsNullOrEmpty(manContent))
             {
-                // Man page not found, try --help
+                // Man page not found, check if we should try --help
+                if (!settings.EnableHelpFallback)
+                {
+                    // Help fallback disabled
+                    statusLabel.Text = $"Error: No manual entry for '{pageName}'";
+                    manPageView.Buffer.Text = $"No manual entry for {pageName}";
+                    isManPageLoaded = false;
+                    currentLoadedProgram = null;
+                    return;
+                }
+                
+                // Try --help
                 string helpContent = GetHelpContent(pageName);
 
                 if (string.IsNullOrEmpty(helpContent))
@@ -235,6 +317,7 @@ public class MainWindow
                                           "Showing output from 'program --help' instead.\n" +
                                           "────────────────────────────────────────────\n\n";
                     manPageView.Buffer.Text = warningBanner + helpContent;
+                    FormatManPage(pageName);
                     statusLabel.Text = $"Displaying help for: {pageName}";
                     isManPageLoaded = true;
                     currentLoadedProgram = pageName;
@@ -244,6 +327,7 @@ public class MainWindow
             {
                 // Man page found
                 manPageView.Buffer.Text = manContent;
+                FormatManPage(pageName);
                 statusLabel.Text = $"Displaying: {pageName}";
                 isManPageLoaded = true;
                 currentLoadedProgram = pageName;
@@ -282,6 +366,9 @@ public class MainWindow
             string output = process.StandardOutput.ReadToEnd();
             process.WaitForExit();
 
+            // Remove control characters that could cause beeps or other unwanted behavior
+            output = System.Text.RegularExpressions.Regex.Replace(output, @"[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]", "");
+
             return output;
         }
         catch (Exception)
@@ -290,21 +377,177 @@ public class MainWindow
         }
     }
 
+    private void FormatManPage(string programName)
+    {
+        TextBuffer buffer = manPageView.Buffer;
+        string text = buffer.Text;
+        string[] lines = text.Split('\n');
+        
+        // Clear man page references
+        manPageReferences.Clear();
+        
+        int lineStart = 0;
+        bool inSeeAlsoSection = false;
+        
+        foreach (string line in lines)
+        {
+            int lineLength = line.Length;
+            TextIter start = buffer.GetIterAtOffset(lineStart);
+            TextIter end = buffer.GetIterAtOffset(lineStart + lineLength);
+            
+            // Format section headers (all caps words at start of line)
+            if (System.Text.RegularExpressions.Regex.IsMatch(line, @"^[A-Z][A-Z\s]+$") && line.Trim().Length > 0)
+            {
+                buffer.ApplyTag(headerTag, start, end);
+                
+                // Check if we're entering the SEE ALSO section
+                string trimmedLine = line.Trim();
+                if (trimmedLine == "SEE ALSO")
+                {
+                    inSeeAlsoSection = true;
+                }
+                else
+                {
+                    inSeeAlsoSection = false;
+                }
+            }
+            // Format command names (program name in various contexts)
+            // Skip lines that look like man page headers/footers: COMMAND(8)...COMMAND(8)
+            else if (line.Contains(programName) && !System.Text.RegularExpressions.Regex.IsMatch(line, @"^\S+\(\d+\).*\S+\(\d+\)\s*$"))
+            {
+                int index = 0;
+                while ((index = line.IndexOf(programName, index)) != -1)
+                {
+                    // Check if this is a whole word match (word boundaries before and after)
+                    bool isWordBoundaryBefore = index == 0 || char.IsWhiteSpace(line[index - 1]) || char.IsPunctuation(line[index - 1]);
+                    bool isWordBoundaryAfter = (index + programName.Length >= line.Length) || 
+                    char.IsWhiteSpace(line[index + programName.Length]) || 
+                    char.IsPunctuation(line[index + programName.Length]);
+                    
+                    if (isWordBoundaryBefore && isWordBoundaryAfter)
+                    {
+                        TextIter cmdStart = buffer.GetIterAtOffset(lineStart + index);
+                        TextIter cmdEnd = buffer.GetIterAtOffset(lineStart + index + programName.Length);
+                        buffer.ApplyTag(commandTag, cmdStart, cmdEnd);
+                    }
+                    index += programName.Length;
+                }
+            }
+            
+            // Format options and arguments using regex
+            // Match options: -x, -?, -x=value, --option, --option=value, -arj, -box, etc.
+            // Can be inside brackets [] or braces {}, separated by pipes |
+            // Values can contain brackets/braces/pipes for syntax (e.g., --opt=[val1|val2])
+            var optionMatches = System.Text.RegularExpressions.Regex.Matches(line, 
+            @"(?<=^|\s|\[|\{|\||,)(-[-a-zA-Z0-9?]+(?:=\[[^\]]+\]|=[^\s,\[\]]+)?|--[a-zA-Z][-a-zA-Z0-9\u2010]*(?:=\[[^\]]+\]|=[^\s,\[\]]+|\[[^\]]+\])?)(?=[\s,\[\]\{\}\|]|$)");
+// ...existing code...
+            foreach (System.Text.RegularExpressions.Match match in optionMatches)
+            {
+                TextIter optStart = buffer.GetIterAtOffset(lineStart + match.Index);
+                TextIter optEnd = buffer.GetIterAtOffset(lineStart + match.Index + match.Length);
+                buffer.ApplyTag(optionTag, optStart, optEnd);
+            }
+            
+            // Format argument placeholders
+            // Match: <WORD>, UPPERCASE_WORDS, single lowercase letter before comma, 
+            // lowercase_with_underscores_or-dashes, lowercase words after dash options with special chars
+            var argMatches = System.Text.RegularExpressions.Regex.Matches(line, 
+            @"<[A-Z_][A-Z_0-9]*>|(?<![a-zA-Z])[A-Z][A-Z_0-9]+(?![a-zA-Z])|(?<=^|\s)[a-z](?=,\s)|(?<=^|\s)[a-z][a-z0-9]*[_\-][a-z0-9_\-:<>\[\]]*|(?<=-[a-zA-Z0-9?]+\s)[a-z][a-z0-9\-:<>\[\]]*");
+            foreach (System.Text.RegularExpressions.Match match in argMatches)
+            {
+                TextIter argStart = buffer.GetIterAtOffset(lineStart + match.Index);
+                TextIter argEnd = buffer.GetIterAtOffset(lineStart + match.Index + match.Length);
+                buffer.ApplyTag(argumentTag, argStart, argEnd);
+            }
+            
+            // Format URLs (http:// or https://)
+            var urlMatches = System.Text.RegularExpressions.Regex.Matches(line, @"https?://[^\s<>\[\]]+");
+            foreach (System.Text.RegularExpressions.Match match in urlMatches)
+            {
+                TextIter urlStart = buffer.GetIterAtOffset(lineStart + match.Index);
+                TextIter urlEnd = buffer.GetIterAtOffset(lineStart + match.Index + match.Length);
+                buffer.ApplyTag(urlTag, urlStart, urlEnd);
+            }
+            
+            // Format file paths (starting with / or ~/)
+            var filePathMatches = System.Text.RegularExpressions.Regex.Matches(line, @"(?:^|\s)(~?/[/\w\-\.]+)");
+            foreach (System.Text.RegularExpressions.Match match in filePathMatches)
+            {
+                // Use Group 1 to skip the leading whitespace
+                if (match.Groups.Count > 1)
+                {
+                    var pathGroup = match.Groups[1];
+                    TextIter pathStart = buffer.GetIterAtOffset(lineStart + pathGroup.Index);
+                    TextIter pathEnd = buffer.GetIterAtOffset(lineStart + pathGroup.Index + pathGroup.Length);
+                    buffer.ApplyTag(filePathTag, pathStart, pathEnd);
+                }
+            }
+            
+            // Format man page references in SEE ALSO section (e.g., program(1), command(8))
+            if (inSeeAlsoSection)
+            {
+                // Match pattern: word-characters followed by (number)
+                // This matches: aa-stack(8), apparmor(7), aa_change_profile(3), etc.
+                var manRefMatches = System.Text.RegularExpressions.Regex.Matches(line, @"([a-zA-Z0-9_\-\.]+)\(\d+\)");
+                foreach (System.Text.RegularExpressions.Match match in manRefMatches)
+                {
+                    // Extract just the program name (without the section number)
+                    string fullMatch = match.Value;  // e.g., "aa-stack(8)"
+                    string progName = match.Groups[1].Value;  // e.g., "aa-stack"
+                    
+                    int matchStart = lineStart + match.Index;
+                    int matchEnd = matchStart + match.Length;
+                    
+                    TextIter refStart = buffer.GetIterAtOffset(matchStart);
+                    TextIter refEnd = buffer.GetIterAtOffset(matchEnd);
+                    buffer.ApplyTag(manReferenceTag, refStart, refEnd);
+                    
+                    // Store the reference for click handling
+                    manPageReferences[(matchStart, matchEnd)] = progName;
+                }
+            }
+            
+            lineStart += lineLength + 1; // +1 for newline character
+        }
+    }
+
     private string GetHelpContent(string programName)
     {
         try
         {
-            var process = new System.Diagnostics.Process();
+            using var process = new System.Diagnostics.Process();
             process.StartInfo.FileName = programName;
             process.StartInfo.Arguments = "--help";
             process.StartInfo.UseShellExecute = false;
             process.StartInfo.RedirectStandardOutput = true;
             process.StartInfo.RedirectStandardError = true;
+            process.StartInfo.RedirectStandardInput = true;  // Prevent waiting for input
             process.StartInfo.CreateNoWindow = true;
 
             process.Start();
-            string output = process.StandardOutput.ReadToEnd();
-            process.WaitForExit();
+            process.StandardInput.Close();  // Close stdin immediately
+            
+            // Use a task with timeout to prevent blocking
+            var outputTask = System.Threading.Tasks.Task.Run(() => process.StandardOutput.ReadToEnd());
+            
+            // Wait for either output or timeout (3 seconds)
+            if (!outputTask.Wait(3000))
+            {
+                // Timeout - kill the process
+                try { process.Kill(); } catch { }
+                return string.Empty;
+            }
+            
+            string output = outputTask.Result;
+            
+            // Ensure process has exited
+            if (!process.HasExited)
+            {
+                try { process.Kill(); } catch { }
+            }
+
+            // Remove control characters that could cause beeps or other unwanted behavior
+            output = System.Text.RegularExpressions.Regex.Replace(output, @"[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]", "");
 
             return output;
         }
@@ -473,6 +716,72 @@ public class MainWindow
         buffer.RemoveTag(currentMatchTag, buffer.StartIter, buffer.EndIter);
     }
 
+    private void OnManPageViewClicked(object? sender, ButtonPressEventArgs args)
+    {
+        // Check if this is a left-click
+        if (args.Event.Button != 1)
+        {
+            return;
+        }
+
+        // Get the clicked position
+        int x = (int)args.Event.X;
+        int y = (int)args.Event.Y;
+        
+        manPageView.WindowToBufferCoords(Gtk.TextWindowType.Widget, x, y, out int bufferX, out int bufferY);
+        manPageView.GetIterAtLocation(out TextIter clickIter, bufferX, bufferY);
+        int clickOffset = clickIter.Offset;
+        
+        // Check if the click is on a man page reference
+        foreach (var kvp in manPageReferences)
+        {
+            var (startOffset, endOffset) = kvp.Key;
+            string programName = kvp.Value;
+            
+            if (clickOffset >= startOffset && clickOffset < endOffset)
+            {
+                // Clicked on a man page reference - load that page
+                LoadManPageAndSelect(programName);
+                args.RetVal = true;
+                return;
+            }
+        }
+        
+        // When user clicks on the man page view (not on a reference), give focus to search entry
+        // so they can immediately start searching
+        if (isManPageLoaded)
+        {
+            searchEntry.GrabFocus();
+        }
+    }
+
+    private void LoadManPageAndSelect(string programName)
+    {
+        // First, try to find and select the program in the list
+        bool foundInList = false;
+        programStore.Foreach((model, path, iter) =>
+        {
+            var value = programStore.GetValue(iter, 0)?.ToString();
+            if (string.Equals(value, programName, StringComparison.OrdinalIgnoreCase))
+            {
+                programListView.Selection.SelectPath(path);
+                programListView.ScrollToCell(path, null, false, 0, 0);
+                foundInList = true;
+                return true; // Stop iteration
+            }
+            return false; // Continue iteration
+        });
+        
+        // Load the man page (even if not found in list, it might still have a man page)
+        LoadManPage(programName);
+        
+        // If not found in the filtered list, it might be filtered out
+        if (!foundInList)
+        {
+            statusLabel.Text = $"Displaying: {programName} (not in executable list)";
+        }
+    }
+
     private void OnDeleteEvent(object? sender, DeleteEventArgs args)
     {
         Application.Quit();
@@ -496,6 +805,34 @@ public class MainWindow
         about.TransientFor = mainWindow;
         about.Modal = true;
         about.Run();
+    }
+
+    private void OnSettingsClicked(object? sender, EventArgs e)
+    {
+        var dialog = new SettingsDialog(mainWindow);
+        var response = dialog.Run();
+        
+        if (response == ResponseType.Ok)
+        {
+            // Reload settings
+            var oldUseSingleClick = settings.UseSingleClick;
+            settings = Settings.Load();
+            
+            // Update event handlers if click mode changed
+            if (oldUseSingleClick != settings.UseSingleClick)
+            {
+                if (settings.UseSingleClick)
+                {
+                    // Enable single-click
+                    programListView.Selection.Changed += OnProgramSelectionChanged;
+                }
+                else
+                {
+                    // Disable single-click
+                    programListView.Selection.Changed -= OnProgramSelectionChanged;
+                }
+            }
+        }
     }
 
     private static string GetUiPath()
