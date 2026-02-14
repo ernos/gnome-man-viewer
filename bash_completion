@@ -1,0 +1,21 @@
+# ~/.bash_completion
+# Completion for gman: second argument completes from /usr/bin.
+
+__gman_complete() {
+    local cur
+    cur="${COMP_WORDS[COMP_CWORD]}"
+
+    # Only complete the second argument (COMP_CWORD=1).
+    if [[ $COMP_CWORD -ne 1 ]]; then
+        return 0
+    fi
+
+    # Cache /usr/bin entries once per shell.
+    if [[ -z ${__USR_BIN_WORDLIST:-} ]]; then
+        __USR_BIN_WORDLIST=$(command ls -1 /usr/bin 2>/dev/null)
+    fi
+
+    COMPREPLY=( $(compgen -W "$__USR_BIN_WORDLIST" -- "$cur") )
+}
+
+complete -F __gman_complete gman
