@@ -83,7 +83,7 @@ public class MainWindow
         column.AddAttribute(cellRenderer, "text", 0);
         programListView.AppendColumn(column);
         programListView.RowActivated += OnProgramSelected;
-        programListView.Selection.Changed += OnProgramSelectionChanged;
+        programListView.KeyPressEvent += OnProgramListKeyPress;
 
         manPageView.Editable = false;
         manPageView.WrapMode = WrapMode.Word;
@@ -116,6 +116,11 @@ public class MainWindow
     public void ShowAll()
     {
         mainWindow.ShowAll();
+        // Give focus to program list if no man page was auto-loaded
+        if (!isManPageLoaded)
+        {
+            programListView.GrabFocus();
+        }
     }
 
     private void LoadPrograms()
@@ -162,12 +167,8 @@ public class MainWindow
                 SearchInManPage(query);
             }
         }
-        else
-        {
-            // No man page loaded: filter program list
-            string lowerQuery = query.ToLower();
-            RefreshProgramList(lowerQuery);
-        }
+        // When no man page is loaded, don't filter programs from search entry
+        // The program list has focus and uses keyboard navigation instead
     }
 
     private void RefreshProgramList(string filter)
@@ -201,14 +202,8 @@ public class MainWindow
 
     private void OnProgramSelectionChanged(object? sender, EventArgs e)
     {
-        if (programListView.Selection.GetSelected(out TreeIter iter))
-        {
-            var program = programStore.GetValue(iter, 0)?.ToString();
-            if (!string.IsNullOrEmpty(program) && !string.Equals(program, currentLoadedProgram, StringComparison.OrdinalIgnoreCase))
-            {
-                LoadManPage(program);
-            }
-        }
+        // Selection changed but we don't auto-load anymore
+        // Only load when user double-clicks (RowActivated) or presses Enter
     }
 
     private void LoadManPage(string pageName)
@@ -408,6 +403,66 @@ public class MainWindow
         {
             OnNextClicked(null, EventArgs.Empty);
             args.RetVal = true;
+        }
+    }
+
+    [GLib.ConnectBefore]
+    private void OnProgramListKeyPress(object? sender, KeyPressEventArgs args)
+    {
+        // Handle Enter/Return key to load selected program
+        if (args.Event.Key == Gdk.Key.Return)
+        {
+            if (programListView.Selection.GetSelected(out TreeIter iter))
+            {
+                var program = programStore.GetValue(iter, 0)?.ToString();
+                if (!string.IsNullOrEmpty(program))
+                {
+                    LoadManPage(program);
+                    args.RetVal = true;
+                    return;
+                }
+            }
+        }
+        
+        // Get the typed character from the key
+        uint keyval = args.Event.KeyValue;
+        char typedChar = (char)Gdk.Keyval.ToUnicode(keyval);
+        
+        // Only process alphabetic and numeric characters
+        if (!char.IsLetterOrDigit(typedChar))
+        {
+            return;
+        }
+        
+        // Make it lowercase for comparison
+        string searchChar = char.ToLower(typedChar).ToString();
+        
+        // Find the first program starting with this character
+        var matchingPrograms = allPrograms
+            .Where(p => p.ToLower().StartsWith(searchChar))
+            .ToList();
+        
+        if (matchingPrograms.Count > 0)
+        {
+            // Find the matching program in the store and select it
+            bool found = false;
+            programStore.Foreach((model, path, iter) =>
+            {
+                var value = programStore.GetValue(iter, 0)?.ToString();
+                if (value == matchingPrograms[0])
+                {
+                    programListView.Selection.SelectPath(path);
+                    programListView.ScrollToCell(path, null, false, 0, 0);
+                    found = true;
+                    return true;
+                }
+                return false;
+            });
+            
+            if (found)
+            {
+                args.RetVal = true;
+            }
         }
     }
 
