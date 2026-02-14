@@ -5,7 +5,7 @@
   <object class="GtkWindow" id="mainWindow">
     <property name="can-focus">False</property>
     <property name="title">GMan - Man Page Viewer</property>
-    <property name="default-width">800</property>
+    <property name="default-width">1100</property>
     <property name="default-height">600</property>
     <child>
       <object class="GtkBox" id="mainBox">
@@ -29,7 +29,7 @@
             </child>
             <child>
               <object class="GtkEntry" id="searchEntry">
-                <property name="can-focus">False</property>
+                <property name="can-focus">True</property>
               </object>
               <packing>
                 <property name="expand">True</property>
@@ -83,7 +83,7 @@
         <child>
           <object class="GtkPaned" id="mainPaned">
             <property name="can-focus">False</property>
-            <property name="position">250</property>
+            <property name="position">120</property>
             <child>
               <object class="GtkBox" id="leftBox">
                 <property name="can-focus">False</property>
@@ -107,7 +107,7 @@
                     <property name="vexpand">True</property>
                     <child>
                       <object class="GtkTreeView" id="programListView">
-                        <property name="can-focus">False</property>
+                        <property name="can-focus">True</property>
                         <property name="headers-visible">False</property>
                         <child internal-child="selection">
                           <object class="GtkTreeSelection"/>
@@ -151,7 +151,7 @@
                     <property name="vexpand">True</property>
                     <child>
                       <object class="GtkTextView" id="manPageView">
-                        <property name="can-focus">False</property>
+                        <property name="can-focus">True</property>
                       </object>
                     </child>
                   </object>
