@@ -6,6 +6,13 @@ All notable changes to GMan will be documented in this file.
 
 ### Added
 
+* **Multi-character type-ahead search in program list**: When the program list has focus, you can now type multiple characters (up to 5) to quickly jump to programs. Features include:
+  + Type quickly (within 1 second) to accumulate characters - e.g., type "gre" to jump to "grep"
+  + Visual feedback in status bar shows what you've typed ("Type-ahead: gre")
+  + Automatically clears after 1 second of no typing
+  + Prefix matching - only matches programs that START with typed text
+  + Works seamlessly with existing single-click/double-click behavior
+
 * **Smart program list filtering**: When "Run programs with --help if no man page exists" is disabled in settings, the program list now only shows executables that have man pages. This is achieved by:
   + Querying the system's man page database via `man -k .`
   + Intersecting the list with installed executables from system directories
