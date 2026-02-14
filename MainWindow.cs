@@ -14,12 +14,28 @@ public class MainWindow
     private readonly TextView manPageView;
     private readonly Label statusLabel;
     private readonly TreeView programListView;
+    private readonly TreeView favoritesListView;
+    private readonly CheckButton showFavoritesCheck;
+    private readonly CheckButton showProgramsCheck;
+    private readonly Paned leftPaned;
+    private readonly Box favoritesBox;
+    private readonly Box programsBox;
+    private readonly ScrolledWindow favoritesListScroll;
+    private readonly ScrolledWindow programListScroll;
+    private readonly Label favoritesLabel;
+    private readonly Label programListLabel;
+    private readonly EventBox favoritesLabelEventBox;
+    private readonly EventBox programListLabelEventBox;
     private readonly Button aboutButton;
     private readonly Button settingsButton;
+    private readonly Button helpButton;
     private readonly Button nextButton;
     private readonly Button previousButton;
     private readonly ListStore programStore;
+    private readonly ListStore favoritesStore;
+    private List<string> favorites = new();
     private Settings settings;
+    private const string FAVORITE_ICON = "starred";
     private TextTag highlightTag;
     private TextTag currentMatchTag;
     private TextTag headerTag;
@@ -41,6 +57,7 @@ public class MainWindow
     private uint? typeAheadTimeoutId = null;
     private string cachedStatusMessage = "";
     private bool isInTypeAhead = false;
+    private int lastPanedPosition = 200; // Store the last user-set paned position
 
     public MainWindow(string? autoLoadProgram = null, string? autoSearchTerm = null)
     {
@@ -50,14 +67,32 @@ public class MainWindow
         mainWindow = (Window)builder.GetObject("mainWindow");
         searchEntry = (Entry)builder.GetObject("searchEntry");
         programListView = (TreeView)builder.GetObject("programListView");
+        favoritesListView = (TreeView)builder.GetObject("favoritesListView");
         manPageView = (TextView)builder.GetObject("manPageView");
         statusLabel = (Label)builder.GetObject("statusLabel");
         aboutButton = (Button)builder.GetObject("aboutButton");
         settingsButton = (Button)builder.GetObject("settingsButton");
+        helpButton = (Button)builder.GetObject("helpButton");
         nextButton = (Button)builder.GetObject("nextButton");
         previousButton = (Button)builder.GetObject("previousButton");
+        showFavoritesCheck = (CheckButton)builder.GetObject("showFavoritesCheck");
+        showProgramsCheck = (CheckButton)builder.GetObject("showProgramsCheck");
+        leftPaned = (Paned)builder.GetObject("leftPaned");
+        favoritesBox = (Box)builder.GetObject("favoritesBox");
+        programsBox = (Box)builder.GetObject("programsBox");
+        favoritesListScroll = (ScrolledWindow)builder.GetObject("favoritesListScroll");
+        programListScroll = (ScrolledWindow)builder.GetObject("programListScroll");
+        favoritesLabel = (Label)builder.GetObject("favoritesLabel");
+        programListLabel = (Label)builder.GetObject("programListLabel");
+        favoritesLabelEventBox = (EventBox)builder.GetObject("favoritesLabelEventBox");
+        programListLabelEventBox = (EventBox)builder.GetObject("programListLabelEventBox");
 
-        if (mainWindow == null || searchEntry == null || programListView == null || manPageView == null || statusLabel == null || aboutButton == null || settingsButton == null || nextButton == null || previousButton == null)
+        if (mainWindow == null || searchEntry == null || programListView == null || favoritesListView == null ||
+            manPageView == null || statusLabel == null || aboutButton == null || settingsButton == null ||
+            helpButton == null || nextButton == null || previousButton == null || showFavoritesCheck == null ||
+            showProgramsCheck == null || leftPaned == null || favoritesBox == null || programsBox == null ||
+            favoritesListScroll == null || programListScroll == null || favoritesLabel == null || programListLabel == null ||
+            favoritesLabelEventBox == null || programListLabelEventBox == null)
         {
             throw new InvalidOperationException("Failed to load UI from main_window.ui");
         }
@@ -85,25 +120,72 @@ public class MainWindow
         // Load settings
         settings = Settings.Load();
 
+        // Load favorites from settings
+        favorites = new List<string>(settings.Favorites);
+
         mainWindow.DeleteEvent += OnDeleteEvent;
         searchEntry.Changed += OnSearchTextChanged;
         searchEntry.KeyPressEvent += OnSearchEntryKeyPress;
         aboutButton.Clicked += OnAboutClicked;
         settingsButton.Clicked += OnSettingsClicked;
+        helpButton.Clicked += OnHelpClicked;
         nextButton.Clicked += OnNextClicked;
         previousButton.Clicked += OnPreviousClicked;
+        showFavoritesCheck.Toggled += OnShowFavoritesToggled;
+        showProgramsCheck.Toggled += OnShowProgramsToggled;
 
-        programStore = new ListStore(typeof(string));
+        // Make labels clickable to toggle checkboxes
+        favoritesLabelEventBox.ButtonPressEvent += OnFavoritesLabelClicked;
+        programListLabelEventBox.ButtonPressEvent += OnProgramListLabelClicked;
+
+        // Setup favorites list (single column: text only)
+        favoritesStore = new ListStore(typeof(string));
+        favoritesListView.Model = favoritesStore;
+        favoritesListView.HeadersVisible = false;
+        favoritesListView.HasTooltip = true;
+        favoritesListView.QueryTooltip += OnFavoritesListQueryTooltip;
+
+        var favoritesColumn = new TreeViewColumn();
+        var favoritesCellRenderer = new CellRendererText();
+        favoritesColumn.PackStart(favoritesCellRenderer, true);
+        favoritesColumn.AddAttribute(favoritesCellRenderer, "text", 0);
+        favoritesListView.AppendColumn(favoritesColumn);
+        favoritesListView.RowActivated += OnFavoritesRowActivated;
+        favoritesListView.KeyPressEvent += OnFavoritesKeyPress;
+        favoritesListView.FocusInEvent += OnFavoritesListFocusIn;
+        favoritesListView.Selection.Changed += OnFavoritesSelectionChangedForHint;
+
+        // Wire up selection handler for favorites based on settings
+        if (settings.UseSingleClick)
+        {
+            favoritesListView.Selection.Changed += OnFavoritesSelectionChanged;
+        }
+
+        // Setup programs list (two columns: icon + text)
+        programStore = new ListStore(typeof(string), typeof(string));
         programListView.Model = programStore;
         programListView.HeadersVisible = false;
+        programListView.HasTooltip = true;
+        programListView.QueryTooltip += OnProgramListQueryTooltip;
 
+        // Column 0: Icon
+        var iconColumn = new TreeViewColumn();
+        var iconRenderer = new CellRendererPixbuf();
+        iconRenderer.StockSize = (uint)IconSize.Menu;
+        iconColumn.PackStart(iconRenderer, false);
+        iconColumn.AddAttribute(iconRenderer, "icon-name", 0);
+        programListView.AppendColumn(iconColumn);
+
+        // Column 1: Text
         var column = new TreeViewColumn();
         var cellRenderer = new CellRendererText();
         column.PackStart(cellRenderer, true);
-        column.AddAttribute(cellRenderer, "text", 0);
+        column.AddAttribute(cellRenderer, "text", 1);
         programListView.AppendColumn(column);
         programListView.RowActivated += OnProgramSelected;
         programListView.KeyPressEvent += OnProgramListKeyPress;
+        programListView.FocusInEvent += OnProgramListFocusIn;
+        programListView.Selection.Changed += OnProgramListSelectionChangedForHint;
 
         // Wire up selection handler based on settings
         if (settings.UseSingleClick)
@@ -173,11 +255,25 @@ public class MainWindow
         // Handle CLI arguments
         if (!string.IsNullOrEmpty(autoLoadProgram))
         {
-            LoadManPage(autoLoadProgram);
-            if (!string.IsNullOrEmpty(autoSearchTerm))
+            // Special handling for --help argument
+            if (autoLoadProgram.Equals("--help", StringComparison.OrdinalIgnoreCase) ||
+                autoLoadProgram.Equals("-h", StringComparison.OrdinalIgnoreCase))
             {
-                searchEntry.Text = autoSearchTerm;
+                LoadHelp();
             }
+            else
+            {
+                LoadManPage(autoLoadProgram);
+                if (!string.IsNullOrEmpty(autoSearchTerm))
+                {
+                    searchEntry.Text = autoSearchTerm;
+                }
+            }
+        }
+        else
+        {
+            // No arguments provided - show help by default
+            LoadHelp();
         }
     }
 
@@ -222,7 +318,10 @@ public class MainWindow
                 // Intersect: only programs that exist in both sets
                 var programsWithManPages = programs.Where(p => manPages.Contains(p)).ToList();
                 allPrograms = programsWithManPages;
+                CleanupFavorites();
                 RefreshProgramList("");
+                RefreshFavoritesList();
+                ApplyFavoritesPosition();
                 statusLabel.Text = $"Ready - {allPrograms.Count} programs with man pages available";
                 return;
             }
@@ -230,8 +329,46 @@ public class MainWindow
         }
 
         allPrograms = programs.ToList();
+        CleanupFavorites();
         RefreshProgramList("");
+        RefreshFavoritesList();
+        ApplyFavoritesPosition();
         statusLabel.Text = $"Ready - {allPrograms.Count} programs available";
+    }
+
+    private void CleanupFavorites()
+    {
+        // Remove favorites that no longer exist in allPrograms
+        int initialCount = favorites.Count;
+        favorites = favorites.Where(f => allPrograms.Contains(f, StringComparer.OrdinalIgnoreCase)).ToList();
+
+        if (favorites.Count < initialCount)
+        {
+            SaveFavorites();
+            int removedCount = initialCount - favorites.Count;
+            Console.WriteLine($"Removed {removedCount} unavailable program(s) from favorites");
+        }
+    }
+
+    private void ApplyFavoritesPosition()
+    {
+        // Reorder children if favorites should be at bottom
+        if (!settings.FavoritesAtTop)
+        {
+            // In GTK Paned, child1 is top/left, child2 is bottom/right
+            // We need to swap them by removing and re-adding
+            var child1 = leftPaned.Child1;
+            var child2 = leftPaned.Child2;
+
+            if (child1 == favoritesBox && child2 == programsBox)
+            {
+                // Currently favorites at top, need to swap
+                leftPaned.Remove(child1);
+                leftPaned.Remove(child2);
+                leftPaned.Pack1(programsBox, false, true);
+                leftPaned.Pack2(favoritesBox, true, true);
+            }
+        }
     }
 
     private HashSet<string> GetManPageNames()
@@ -344,7 +481,9 @@ public class MainWindow
 
         foreach (var program in filtered)
         {
-            programStore.AppendValues(program);
+            // Column 0: icon (show star if favorited), Column 1: program name
+            string icon = favorites.Contains(program, StringComparer.OrdinalIgnoreCase) ? FAVORITE_ICON : "";
+            programStore.AppendValues(icon, program);
         }
 
         // Reattach model after populating
@@ -354,12 +493,68 @@ public class MainWindow
         statusLabel.Text = cachedStatusMessage;
     }
 
+    private void RefreshFavoritesList()
+    {
+        // Unselect all items before clearing
+        favoritesListView.Selection.UnselectAll();
+
+        // Temporarily detach model
+        favoritesListView.Model = null;
+
+        favoritesStore.Clear();
+
+        // Only show favorites that exist in allPrograms
+        var validFavorites = favorites.Where(f => allPrograms.Contains(f, StringComparer.OrdinalIgnoreCase)).ToList();
+
+        foreach (var favorite in validFavorites)
+        {
+            favoritesStore.AppendValues(favorite);
+        }
+
+        // Reattach model after populating
+        favoritesListView.Model = favoritesStore;
+    }
+
+    private void SaveFavorites()
+    {
+        settings.Favorites = new List<string>(favorites);
+        settings.Save();
+    }
+
+    private void AddToFavorites(string program)
+    {
+        if (!favorites.Contains(program, StringComparer.OrdinalIgnoreCase))
+        {
+            favorites.Add(program);
+            SaveFavorites();
+            RefreshFavoritesList();
+            RefreshProgramList(""); // Refresh to show star icon
+            statusLabel.Text = $"Added '{program}' to favorites";
+        }
+        else
+        {
+            statusLabel.Text = $"'{program}' is already in favorites";
+        }
+    }
+
+    private void RemoveFromFavorites(string program)
+    {
+        var removed = favorites.RemoveAll(f => string.Equals(f, program, StringComparison.OrdinalIgnoreCase)) > 0;
+        if (removed)
+        {
+            SaveFavorites();
+            RefreshFavoritesList();
+            RefreshProgramList(""); // Refresh to remove star icon
+            statusLabel.Text = $"Removed '{program}' from favorites";
+        }
+    }
+
     private void OnProgramSelected(object? sender, RowActivatedArgs args)
     {
         string pathStr = args.Path.ToString();
         if (programStore.GetIterFromString(out var iter, pathStr))
         {
-            var program = programStore.GetValue(iter, 0)?.ToString();
+            var program = programStore.GetValue(iter, 1)?.ToString(); // Column 1 is text
             if (!string.IsNullOrEmpty(program))
             {
                 LoadManPage(program);
@@ -381,7 +576,7 @@ public class MainWindow
         // This handler is only attached when single-click mode is enabled
         if (settings.UseSingleClick && programListView.Selection.GetSelected(out TreeIter iter))
         {
-            var program = programStore.GetValue(iter, 0)?.ToString();
+            var program = programStore.GetValue(iter, 1)?.ToString(); // Column 1 is text
             if (!string.IsNullOrEmpty(program) && !string.Equals(program, currentLoadedProgram, StringComparison.OrdinalIgnoreCase))
             {
                 LoadManPage(program);
@@ -782,10 +977,25 @@ public class MainWindow
 
             if (programListView.Selection.GetSelected(out TreeIter selectedIter))
             {
-                var program = programStore.GetValue(selectedIter, 0)?.ToString();
+                var program = programStore.GetValue(selectedIter, 1)?.ToString(); // Column 1 is text
                 if (!string.IsNullOrEmpty(program))
                 {
                     LoadManPage(program);
+                    args.RetVal = true;
+                    return;
+                }
+            }
+        }
+
+        // Handle '+' key to add to favorites
+        if (args.Event.Key == Gdk.Key.plus || args.Event.Key == Gdk.Key.KP_Add)
+        {
+            if (programListView.Selection.GetSelected(out TreeIter selectedIter))
+            {
+                var program = programStore.GetValue(selectedIter, 1)?.ToString();
+                if (!string.IsNullOrEmpty(program))
+                {
+                    AddToFavorites(program);
                     args.RetVal = true;
                     return;
                 }
@@ -857,7 +1067,7 @@ public class MainWindow
         {
             do
             {
-                var value = programStore.GetValue(iter, 0)?.ToString();
+                var value = programStore.GetValue(iter, 1)?.ToString(); // Column 1 is text
                 if (value != null && value.ToLower().StartsWith(typeAheadBuffer))
                 {
                     // Found a match - select and scroll
@@ -878,6 +1088,278 @@ public class MainWindow
         if (found)
         {
             args.RetVal = true;
+        }
+    }
+
+    [GLib.ConnectBefore]
+    private void OnFavoritesKeyPress(object? sender, KeyPressEventArgs args)
+    {
+        // Handle Enter key: load man page
+        if (args.Event.Key == Gdk.Key.Return || args.Event.Key == Gdk.Key.KP_Enter)
+        {
+            if (favoritesListView.Selection.GetSelected(out TreeIter selectedIter))
+            {
+                var program = favoritesStore.GetValue(selectedIter, 0)?.ToString();
+                if (!string.IsNullOrEmpty(program))
+                {
+                    LoadManPage(program);
+                    args.RetVal = true;
+                    return;
+                }
+            }
+        }
+
+        // Handle '-' key: remove from favorites
+        if (args.Event.Key == Gdk.Key.minus || args.Event.Key == Gdk.Key.KP_Subtract)
+        {
+            if (favoritesListView.Selection.GetSelected(out TreeIter selectedIter))
+            {
+                var program = favoritesStore.GetValue(selectedIter, 0)?.ToString();
+                if (!string.IsNullOrEmpty(program))
+                {
+                    RemoveFromFavorites(program);
+                    args.RetVal = true;
+                    return;
+                }
+            }
+        }
+
+        // Type-ahead navigation for favorites (same logic as programs list)
+        uint keyval = args.Event.KeyValue;
+        char typedChar = (char)Gdk.Keyval.ToUnicode(keyval);
+
+        if (!char.IsLetterOrDigit(typedChar))
+        {
+            return;
+        }
+
+        isInTypeAhead = true;
+
+        if (typeAheadTimeoutId.HasValue)
+        {
+            try
+            {
+                GLib.Source.Remove(typeAheadTimeoutId.Value);
+            }
+            catch { }
+            typeAheadTimeoutId = null;
+        }
+
+        typeAheadBuffer += char.ToLower(typedChar);
+        if (typeAheadBuffer.Length > 5)
+        {
+            typeAheadBuffer = typeAheadBuffer.Substring(typeAheadBuffer.Length - 5);
+        }
+
+        statusLabel.Text = $"Type-ahead: {typeAheadBuffer}";
+
+        typeAheadTimeoutId = GLib.Timeout.Add(1000, () =>
+        {
+            ResetTypeAheadBuffer();
+            return false;
+        });
+
+        // Find first favorite starting with buffer
+        bool found = false;
+        TreeIter iter;
+
+        if (favoritesStore.GetIterFirst(out iter))
+        {
+            do
+            {
+                var value = favoritesStore.GetValue(iter, 0)?.ToString();
+                if (value != null && value.ToLower().StartsWith(typeAheadBuffer))
+                {
+                    TreePath path = favoritesStore.GetPath(iter);
+                    favoritesListView.Selection.SelectPath(path);
+                    GLib.Idle.Add(() =>
+                    {
+                        favoritesListView.ScrollToCell(path, null, false, 0, 0);
+                        return false;
+                    });
+                    found = true;
+                    break;
+                }
+            } while (favoritesStore.IterNext(ref iter));
+        }
+
+        if (found)
+        {
+            args.RetVal = true;
+        }
+    }
+
+    private void OnFavoritesRowActivated(object? sender, RowActivatedArgs args)
+    {
+        string pathStr = args.Path.ToString();
+        if (favoritesStore.GetIterFromString(out var iter, pathStr))
+        {
+            var program = favoritesStore.GetValue(iter, 0)?.ToString();
+            if (!string.IsNullOrEmpty(program))
+            {
+                LoadManPage(program);
+            }
+        }
+    }
+
+    private void OnFavoritesSelectionChanged(object? sender, EventArgs e)
+    {
+        // Don't load man page if we're just navigating with type-ahead
+        if (isInTypeAhead)
+        {
+            return;
+        }
+
+        // This handler is only attached when single-click mode is enabled
+        if (settings.UseSingleClick && favoritesListView.Selection.GetSelected(out TreeIter iter))
+        {
+            var program = favoritesStore.GetValue(iter, 0)?.ToString();
+            if (!string.IsNullOrEmpty(program) && !string.Equals(program, currentLoadedProgram, StringComparison.OrdinalIgnoreCase))
+            {
+                LoadManPage(program);
+            }
+        }
+    }
+
+    private void OnShowFavoritesToggled(object? sender, EventArgs e)
+    {
+        if (showFavoritesCheck.Active)
+        {
+            // Show favorites list
+            favoritesListScroll.Visible = true;
+            favoritesBox.SetSizeRequest(-1, -1); // Reset size constraint
+            // Restore previous position if programs list is also visible
+            if (showProgramsCheck.Active)
+            {
+                leftPaned.Position = lastPanedPosition;
+            }
+        }
+        else
+        {
+            // Hide favorites list
+            if (showProgramsCheck.Active)
+            {
+                lastPanedPosition = leftPaned.Position; // Save current position
+            }
+            favoritesListScroll.Visible = false;
+            favoritesBox.SetSizeRequest(-1, 20); // Collapse to minimal height (just header)
+            leftPaned.Position = 20; // Give most space to programs list
+        }
+    }
+
+    private void OnShowProgramsToggled(object? sender, EventArgs e)
+    {
+        if (showProgramsCheck.Active)
+        {
+            // Show programs list
+            programListScroll.Visible = true;
+            programsBox.SetSizeRequest(-1, -1); // Reset size constraint
+            // Restore previous position if favorites list is also visible
+            if (showFavoritesCheck.Active)
+            {
+                leftPaned.Position = lastPanedPosition;
+            }
+        }
+        else
+        {
+            // Hide programs list
+            if (showFavoritesCheck.Active)
+            {
+                lastPanedPosition = leftPaned.Position; // Save current position
+            }
+            programListScroll.Visible = false;
+            programsBox.SetSizeRequest(-1, 30); // Collapse to minimal height (just header)
+            // Position paned to give most space to favorites
+            leftPaned.Position = leftPaned.Parent.AllocatedHeight - 30;
+        }
+    }
+
+    private void OnFavoritesLabelClicked(object? sender, ButtonPressEventArgs args)
+    {
+        Console.WriteLine("DEBUG: Favorites label clicked");
+        showFavoritesCheck.Active = !showFavoritesCheck.Active;
+        args.RetVal = true;
+    }
+
+    private void OnProgramListLabelClicked(object? sender, ButtonPressEventArgs args)
+    {
+        Console.WriteLine("DEBUG: Programs label clicked");
+        showProgramsCheck.Active = !showProgramsCheck.Active;
+        args.RetVal = true;
+    }
+
+    private void OnProgramListFocusIn(object? sender, FocusInEventArgs args)
+    {
+        if (programListView.Selection.GetSelected(out _))
+        {
+            UpdateStatusWithHint(" - Press + key to add this program to your favorites list");
+        }
+    }
+
+    private void OnProgramListSelectionChangedForHint(object? sender, EventArgs e)
+    {
+        if (programListView.HasFocus && programListView.Selection.GetSelected(out _))
+        {
+            UpdateStatusWithHint(" - Press + key to add this program to your favorites list");
+        }
+    }
+
+    private void OnFavoritesListFocusIn(object? sender, FocusInEventArgs args)
+    {
+        if (favoritesListView.Selection.GetSelected(out _))
+        {
+            UpdateStatusWithHint(" - Press - key to remove this program from your favorites");
+        }
+    }
+
+    private void OnFavoritesSelectionChangedForHint(object? sender, EventArgs e)
+    {
+        if (favoritesListView.HasFocus && favoritesListView.Selection.GetSelected(out _))
+        {
+            UpdateStatusWithHint(" - Press - key to remove this program from your favorites");
+        }
+    }
+
+    private void UpdateStatusWithHint(string hint)
+    {
+        var currentText = statusLabel.Text;
+        // Remove any existing hints first
+        if (currentText.Contains(" - Press + key"))
+        {
+            var index = currentText.IndexOf(" - Press + key");
+            currentText = currentText.Substring(0, index);
+        }
+        if (currentText.Contains(" - Press - key"))
+        {
+            var index = currentText.IndexOf(" - Press - key");
+            currentText = currentText.Substring(0, index);
+        }
+        statusLabel.Text = currentText + hint;
+    }
+
+    private void OnProgramListQueryTooltip(object o, QueryTooltipArgs args)
+    {
+        if (programListView.GetPathAtPos(args.X, args.Y, out TreePath path))
+        {
+            args.Tooltip.Text = "Press + key to add this program to your favorites list";
+            args.RetVal = true;
+        }
+        else
+        {
+            args.RetVal = false;
+        }
+    }
+
+    private void OnFavoritesListQueryTooltip(object o, QueryTooltipArgs args)
+    {
+        if (favoritesListView.GetPathAtPos(args.X, args.Y, out TreePath path))
+        {
+            args.Tooltip.Text = "Press - key to remove this program from your favorites";
+            args.RetVal = true;
+        }
+        else
+        {
+            args.RetVal = false;
         }
     }
 
@@ -946,7 +1428,7 @@ public class MainWindow
         bool foundInList = false;
         programStore.Foreach((model, path, iter) =>
         {
-            var value = programStore.GetValue(iter, 0)?.ToString();
+            var value = programStore.GetValue(iter, 1)?.ToString(); // Column 1 is text
             if (string.Equals(value, programName, StringComparison.OrdinalIgnoreCase))
             {
                 programListView.Selection.SelectPath(path);
@@ -992,6 +1474,122 @@ public class MainWindow
         about.Run();
     }
 
+    private void OnHelpClicked(object? sender, EventArgs e)
+    {
+        LoadHelp();
+    }
+
+    private void LoadHelp()
+    {
+        try
+        {
+            string helpPath = System.IO.Path.Combine(AppContext.BaseDirectory, "ui", "help.txt");
+            if (!File.Exists(helpPath))
+            {
+                statusLabel.Text = "Error: Help file not found";
+                return;
+            }
+
+            string helpText = File.ReadAllText(helpPath);
+
+            // Clear any existing search state
+            ClearSearchHighlights();
+            searchEntry.Text = "";
+            searchMatches.Clear();
+            currentMatchIndex = -1;
+            lastSearchTerm = null;
+            manPageReferences.Clear();
+
+            // Set the help text
+            manPageView.Buffer.Text = helpText;
+
+            // Format the help text like a man page
+            FormatHelpText();
+
+            isManPageLoaded = true;
+            currentLoadedProgram = "GMan Help";
+            statusLabel.Text = "Displaying: GMan Help";
+        }
+        catch (Exception ex)
+        {
+            statusLabel.Text = $"Error loading help: {ex.Message}";
+        }
+    }
+
+    private void FormatHelpText()
+    {
+        TextBuffer buffer = manPageView.Buffer;
+        string text = buffer.Text;
+        string[] lines = text.Split('\n');
+
+        for (int lineIndex = 0; lineIndex < lines.Length; lineIndex++)
+        {
+            string line = lines[lineIndex];
+            if (string.IsNullOrWhiteSpace(line))
+                continue;
+
+            // Calculate line offset
+            int lineStart = 0;
+            for (int i = 0; i < lineIndex; i++)
+                lineStart += lines[i].Length + 1; // +1 for newline
+
+            // Section headers (all caps, standalone lines)
+            if (lineIndex > 0 && lineIndex < lines.Length - 1 &&
+                line == line.ToUpper() && line.Length > 0 &&
+                !line.StartsWith("    ") && !line.StartsWith("\t"))
+            {
+                TextIter start = buffer.GetIterAtOffset(lineStart);
+                TextIter end = buffer.GetIterAtOffset(lineStart + line.Length);
+                buffer.ApplyTag(headerTag, start, end);
+                continue;
+            }
+
+            // Options and commands indented with spaces
+            if (line.StartsWith("    ") && line.Trim().Length > 0)
+            {
+                // Check for option patterns like "+ key", "- key", "Enter", etc.
+                var optionMatch = System.Text.RegularExpressions.Regex.Match(line, @"^\s+([+\-]|Enter|Return|Letters)\s+(key|-)\s");
+                if (optionMatch.Success)
+                {
+                    int matchStart = lineStart + optionMatch.Index;
+                    int matchEnd = matchStart + optionMatch.Length;
+                    TextIter start = buffer.GetIterAtOffset(matchStart);
+                    TextIter end = buffer.GetIterAtOffset(matchEnd);
+                    buffer.ApplyTag(optionTag, start, end);
+                    continue;
+                }
+            }
+
+            // File paths
+            if (line.Contains("~/.config/gman") || line.Contains("/home/"))
+            {
+                var pathMatches = System.Text.RegularExpressions.Regex.Matches(line, @"(/[^\s]+|~/[^\s]+)");
+                foreach (System.Text.RegularExpressions.Match match in pathMatches)
+                {
+                    int matchStart = lineStart + match.Index;
+                    int matchEnd = matchStart + match.Length;
+                    TextIter start = buffer.GetIterAtOffset(matchStart);
+                    TextIter end = buffer.GetIterAtOffset(matchEnd);
+                    buffer.ApplyTag(filePathTag, start, end);
+                }
+            }
+
+            // URLs
+            if (line.Contains("http://") || line.Contains("https://"))
+            {
+                var urlMatches = System.Text.RegularExpressions.Regex.Matches(line, @"https?://[^\s]+");
+                foreach (System.Text.RegularExpressions.Match match in urlMatches)
+                {
+                    int matchStart = lineStart + match.Index;
+                    int matchEnd = matchStart + match.Length;
+                    TextIter start = buffer.GetIterAtOffset(matchStart);
+                    TextIter end = buffer.GetIterAtOffset(matchEnd);
+                    buffer.ApplyTag(urlTag, start, end);
+                }
+            }
+        }
+    }
+
     private void OnSettingsClicked(object? sender, EventArgs e)
     {
         try
@@ -999,8 +1597,9 @@ public class MainWindow
             // Reload settings before showing dialog
             var oldUseSingleClick = settings.UseSingleClick;
             var oldEnableHelpFallback = settings.EnableHelpFallback;
+            var oldFavoritesAtTop = settings.FavoritesAtTop;
 
-            var (response, newEnableHelpFallback, newUseSingleClick) = SettingsDialog.ShowDialog(mainWindow);
+            var (response, newEnableHelpFallback, newUseSingleClick, newFavoritesAtTop) = SettingsDialog.ShowDialog(mainWindow);
 
             if (response == ResponseType.Ok)
             {
@@ -1012,13 +1611,37 @@ public class MainWindow
                 {
                     if (newUseSingleClick)
                     {
-                        // Enable single-click
+                        // Enable single-click for both lists
                         programListView.Selection.Changed += OnProgramSelectionChanged;
+                        favoritesListView.Selection.Changed += OnFavoritesSelectionChanged;
                     }
                     else
                     {
-                        // Disable single-click
+                        // Disable single-click for both lists
                         programListView.Selection.Changed -= OnProgramSelectionChanged;
+                        favoritesListView.Selection.Changed -= OnFavoritesSelectionChanged;
+                    }
+                }
+
+                // Apply favorites position if changed
+                if (oldFavoritesAtTop != newFavoritesAtTop)
+                {
+                    // Need to re-create the paned structure to swap children
+                    var child1 = leftPaned.Child1;
+                    var child2 = leftPaned.Child2;
+
+                    leftPaned.Remove(child1);
+                    leftPaned.Remove(child2);
+
+                    if (newFavoritesAtTop)
+                    {
+                        leftPaned.Pack1(favoritesBox, false, true);
+                        leftPaned.Pack2(programsBox, true, true);
+                    }
+                    else
+                    {
+                        leftPaned.Pack1(programsBox, true, true);
+                        leftPaned.Pack2(favoritesBox, false, true);
                     }
                 }
 

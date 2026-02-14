@@ -6,6 +6,79 @@ All notable changes to GMan will be documented in this file.
 
 ### Added
 
+* **Favorites list with persistent storage**: Added a dedicated favorites list with full persistence and visual indicators:
+  + Separate favorites list displayed in the left pane alongside the main program list
+  + Press '+' key while in the All Programs list to add the selected program to favorites
+  + Press '-' key while in the Favorites list to remove the selected item
+  + Star (⭐) icon appears next to favorited programs in the All Programs list
+  + Favorites automatically saved to `~/.config/gman/settings.conf`
+  + Works with both single-click and double-click modes
+  + Type-ahead search works in both lists
+  + Enter key loads man pages from either list
+  + Duplicate detection with status message feedback
+  + Automatically removes unavailable programs from favorites on startup
+
+* **Show/hide controls for program lists**: Added checkboxes to toggle visibility of both lists:
+  + Each list has a checkbox in its header to show/hide that list
+  + Both checkboxes checked by default (both lists visible)
+  + User-resizable split between lists with drag handle (GtkPaned)
+  + Default split position: 200px for favorites, remainder for programs
+
+* **Configurable favorites position**: Added setting to control favorites list position:
+  + New setting in Settings dialog: "Show favorites at top" vs "Show favorites at bottom"
+  + Defaults to showing favorites at top
+  + Changes apply immediately when settings are saved
+  + Setting persisted to configuration file
+
+* **Built-in Help system**: Added comprehensive help documentation accessible within the application:
+  + New Help button in toolbar displays formatted help text
+  + Support for `gman --help` command-line argument
+  + Help text formatted with syntax highlighting (headers, options, file paths, URLs)
+  + Covers all features: favorites, keyboard shortcuts, search, settings
+  + User-friendly quick reference guide in man page style
+
+* **Enhanced UI interaction**: Improved user experience with list controls:
+  + Clickable list labels toggle visibility (click "Favorites" or "Available Programs" text)
+  + Contextual tooltips show keyboard shortcuts when hovering over list items
+  + Status bar displays hints for available keyboard shortcuts based on focus
+  + Collapsible lists save space by shrinking to header-only height when hidden
+  + Preserved divider position restores when showing both lists again
+
+### Technical Details
+
+* **Favorites implementation**:
+  + Added `List<string> favorites` field to track favorite programs
+  + Added `ListStore favoritesStore` for GTK TreeView model
+  + Modified program list to use multi-column TreeView (icon + text) for star indicators
+  + Single-column TreeView for favorites (no icon needed)
+  + Added `AddToFavorites()` and `RemoveFromFavorites()` helper methods
+  + Added `RefreshFavoritesList()` to sync UI with data
+  + Added `CleanupFavorites()` to remove unavailable programs on startup
+  + Added `SaveFavorites()` to persist changes immediately
+
+* **Settings persistence**:
+  + Added `Favorites` property to Settings class (List<string>)
+  + Added `FavoritesAtTop` property to Settings class (bool, default true)
+  + Settings stored as comma-separated string: `Favorites=ls,grep,man`
+  + Updated `Settings.Load()` to parse favorites list
+  + Updated `Settings.Save()` to serialize favorites list
+
+* **UI structure changes**:
+  + Replaced simple `leftBox` with vertical `GtkPaned` containing two sections
+  + Added `favoritesBox` and `programsBox` containers
+  + Added `showFavoritesCheck` and `showProgramsCheck` checkboxes
+  + Added `favoritesListView` TreeView with event handlers
+  + Updated `programStore` from single-column to two-column (icon, text)
+  + All `programStore.GetValue(iter, 0)` references updated to use column 1 for text
+
+* **Event handlers**:
+  + Added `OnFavoritesRowActivated()` for double-click
+  + Added `OnFavoritesKeyPress()` for Enter/- key and type-ahead
+  + Added `OnFavoritesSelectionChanged()` for single-click mode
+  + Added `OnShowFavoritesToggled()` and `OnShowProgramsToggled()` for checkbox toggles
+  + Updated `OnProgramListKeyPress()` to handle '+' key for adding favorites
+  + Updated `OnSettingsClicked()` to handle favorites position changes
+
 * **Multi-character type-ahead search in program list**: When the program list has focus, you can now type multiple characters (up to 5) to quickly jump to programs. Features include:
   + Type quickly (within 1 second) to accumulate characters - e.g., type "gre" to jump to "grep"
   + Visual feedback in status bar shows what you've typed ("Type-ahead: gre")
