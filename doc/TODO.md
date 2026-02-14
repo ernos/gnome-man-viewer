@@ -8,5 +8,5 @@
 
 ## BUGS
 
-* Opening of alsabat-test runs an annoying sound beep test, if the *'run program with --help'* option is enabled.
-* Regexp bug when parsing options in man pages. `-virtual-pixel` (from program animate) gets handled incorrectly because of the '-' in the word.
+* **Opening of alsabat-test runs an annoying alsa sound beep test**:, if the *'run program with --help'* option is enabled.
+* ~~**Regexp bug when parsing options in man pages:**: `-virtual-pixel` (from program animate) gets handled incorrectly because of the '-' in the word.~~

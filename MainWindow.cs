@@ -74,7 +74,7 @@ public class MainWindow
             }
         }
         catch (Exception ex)
-        { 
+        {
             Console.WriteLine($"Icon loading failed: {ex.Message}");
         }
 
@@ -100,7 +100,7 @@ public class MainWindow
         programListView.AppendColumn(column);
         programListView.RowActivated += OnProgramSelected;
         programListView.KeyPressEvent += OnProgramListKeyPress;
-        
+
         // Wire up selection handler based on settings
         if (settings.UseSingleClick)
         {
@@ -209,9 +209,98 @@ public class MainWindow
             }
         }
 
+        // If EnableHelpFallback is false, only show programs with man pages
+        if (!settings.EnableHelpFallback)
+        {
+            var manPages = GetManPageNames();
+            if (manPages.Count > 0)
+            {
+                // Intersect: only programs that exist in both sets
+                var programsWithManPages = programs.Where(p => manPages.Contains(p)).ToList();
+                allPrograms = programsWithManPages;
+                RefreshProgramList("");
+                statusLabel.Text = $"Ready - {allPrograms.Count} programs with man pages available";
+                return;
+            }
+            // If man -k fails, fall through to show all programs
+        }
+
         allPrograms = programs.ToList();
         RefreshProgramList("");
         statusLabel.Text = $"Ready - {allPrograms.Count} programs available";
+    }
+
+    private HashSet<string> GetManPageNames()
+    {
+        var manPages = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        try
+        {
+            var process = new System.Diagnostics.Process
+            {
+                StartInfo = new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = "man",
+                    Arguments = "-k .",
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    CreateNoWindow = true
+                }
+            };
+
+            Console.WriteLine("Starting man -k . query...");
+            process.Start();
+
+            // Read output with timeout
+            var outputTask = System.Threading.Tasks.Task.Run(() => process.StandardOutput.ReadToEnd());
+
+            // Wait up to 5 seconds for man -k to complete
+            if (!outputTask.Wait(5000))
+            {
+                Console.WriteLine("man -k . timed out after 5 seconds");
+                try { process.Kill(); } catch { }
+                return manPages; // Return empty set on timeout
+            }
+
+            string output = outputTask.Result;
+
+            if (!process.HasExited)
+            {
+                try { process.Kill(); } catch { }
+            }
+            else if (process.ExitCode != 0)
+            {
+                Console.WriteLine($"man -k . failed with exit code {process.ExitCode}");
+                return manPages; // Return empty set on failure
+            }
+
+            Console.WriteLine($"man -k . returned {output.Split('\n').Length} lines");
+
+            // Parse output: "program_name (section) - description"
+            // Extract everything before the first space and opening parenthesis
+            foreach (var line in output.Split('\n'))
+            {
+                if (string.IsNullOrWhiteSpace(line))
+                    continue;
+
+                var match = System.Text.RegularExpressions.Regex.Match(line, @"^([^\s(]+)\s*\(");
+                if (match.Success)
+                {
+                    manPages.Add(match.Groups[1].Value);
+                }
+            }
+
+            Console.WriteLine($"Parsed {manPages.Count} unique man page names");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error in GetManPageNames: {ex.Message}");
+            // If man -k fails, return empty set (caller will use all programs)
+            return manPages;
+        }
+
+        return manPages;
     }
 
     private void OnSearchTextChanged(object? sender, EventArgs e)
@@ -237,6 +326,12 @@ public class MainWindow
 
     private void RefreshProgramList(string filter)
     {
+        // Unselect all items before clearing to avoid GTK object lifecycle issues
+        programListView.Selection.UnselectAll();
+
+        // Temporarily detach model to prevent GTK from tracking changes during clear
+        programListView.Model = null;
+
         programStore.Clear();
 
         var filtered = string.IsNullOrEmpty(filter)
@@ -247,6 +342,9 @@ public class MainWindow
         {
             programStore.AppendValues(program);
         }
+
+        // Reattach model after populating
+        programListView.Model = programStore;
 
         statusLabel.Text = $"Found {filtered.Count} program(s)";
     }
@@ -282,7 +380,7 @@ public class MainWindow
         try
         {
             statusLabel.Text = $"Loading man page for '{pageName}'...";
-            
+
             // Try to get man page content
             string manContent = GetManPageContent(pageName);
 
@@ -298,7 +396,7 @@ public class MainWindow
                     currentLoadedProgram = null;
                     return;
                 }
-                
+
                 // Try --help
                 string helpContent = GetHelpContent(pageName);
 
@@ -382,24 +480,24 @@ public class MainWindow
         TextBuffer buffer = manPageView.Buffer;
         string text = buffer.Text;
         string[] lines = text.Split('\n');
-        
+
         // Clear man page references
         manPageReferences.Clear();
-        
+
         int lineStart = 0;
         bool inSeeAlsoSection = false;
-        
+
         foreach (string line in lines)
         {
             int lineLength = line.Length;
             TextIter start = buffer.GetIterAtOffset(lineStart);
             TextIter end = buffer.GetIterAtOffset(lineStart + lineLength);
-            
+
             // Format section headers (all caps words at start of line)
             if (System.Text.RegularExpressions.Regex.IsMatch(line, @"^[A-Z][A-Z\s]+$") && line.Trim().Length > 0)
             {
                 buffer.ApplyTag(headerTag, start, end);
-                
+
                 // Check if we're entering the SEE ALSO section
                 string trimmedLine = line.Trim();
                 if (trimmedLine == "SEE ALSO")
@@ -420,10 +518,10 @@ public class MainWindow
                 {
                     // Check if this is a whole word match (word boundaries before and after)
                     bool isWordBoundaryBefore = index == 0 || char.IsWhiteSpace(line[index - 1]) || char.IsPunctuation(line[index - 1]);
-                    bool isWordBoundaryAfter = (index + programName.Length >= line.Length) || 
-                    char.IsWhiteSpace(line[index + programName.Length]) || 
+                    bool isWordBoundaryAfter = (index + programName.Length >= line.Length) ||
+                    char.IsWhiteSpace(line[index + programName.Length]) ||
                     char.IsPunctuation(line[index + programName.Length]);
-                    
+
                     if (isWordBoundaryBefore && isWordBoundaryAfter)
                     {
                         TextIter cmdStart = buffer.GetIterAtOffset(lineStart + index);
@@ -433,25 +531,25 @@ public class MainWindow
                     index += programName.Length;
                 }
             }
-            
+
             // Format options and arguments using regex
             // Match options: -x, -?, -x=value, --option, --option=value, -arj, -box, etc.
             // Can be inside brackets [] or braces {}, separated by pipes |
             // Values can contain brackets/braces/pipes for syntax (e.g., --opt=[val1|val2])
-            var optionMatches = System.Text.RegularExpressions.Regex.Matches(line, 
+            var optionMatches = System.Text.RegularExpressions.Regex.Matches(line,
             @"(?<=^|\s|\[|\{|\||,)(-[-a-zA-Z0-9?]+(?:=\[[^\]]+\]|=[^\s,\[\]]+)?|--[a-zA-Z][-a-zA-Z0-9\u2010]*(?:=\[[^\]]+\]|=[^\s,\[\]]+|\[[^\]]+\])?)(?=[\s,\[\]\{\}\|]|$)");
-// ...existing code...
+            // ...existing code...
             foreach (System.Text.RegularExpressions.Match match in optionMatches)
             {
                 TextIter optStart = buffer.GetIterAtOffset(lineStart + match.Index);
                 TextIter optEnd = buffer.GetIterAtOffset(lineStart + match.Index + match.Length);
                 buffer.ApplyTag(optionTag, optStart, optEnd);
             }
-            
+
             // Format argument placeholders
             // Match: <WORD>, UPPERCASE_WORDS, single lowercase letter before comma, 
             // lowercase_with_underscores_or-dashes, lowercase words after dash options with special chars
-            var argMatches = System.Text.RegularExpressions.Regex.Matches(line, 
+            var argMatches = System.Text.RegularExpressions.Regex.Matches(line,
             @"<[A-Z_][A-Z_0-9]*>|(?<![a-zA-Z])[A-Z][A-Z_0-9]+(?![a-zA-Z])|(?<=^|\s)[a-z](?=,\s)|(?<=^|\s)[a-z][a-z0-9]*[_\-][a-z0-9_\-:<>\[\]]*|(?<=-[a-zA-Z0-9?]+\s)[a-z][a-z0-9\-:<>\[\]]*");
             foreach (System.Text.RegularExpressions.Match match in argMatches)
             {
@@ -459,7 +557,7 @@ public class MainWindow
                 TextIter argEnd = buffer.GetIterAtOffset(lineStart + match.Index + match.Length);
                 buffer.ApplyTag(argumentTag, argStart, argEnd);
             }
-            
+
             // Format URLs (http:// or https://)
             var urlMatches = System.Text.RegularExpressions.Regex.Matches(line, @"https?://[^\s<>\[\]]+");
             foreach (System.Text.RegularExpressions.Match match in urlMatches)
@@ -468,7 +566,7 @@ public class MainWindow
                 TextIter urlEnd = buffer.GetIterAtOffset(lineStart + match.Index + match.Length);
                 buffer.ApplyTag(urlTag, urlStart, urlEnd);
             }
-            
+
             // Format file paths (starting with / or ~/)
             var filePathMatches = System.Text.RegularExpressions.Regex.Matches(line, @"(?:^|\s)(~?/[/\w\-\.]+)");
             foreach (System.Text.RegularExpressions.Match match in filePathMatches)
@@ -482,7 +580,7 @@ public class MainWindow
                     buffer.ApplyTag(filePathTag, pathStart, pathEnd);
                 }
             }
-            
+
             // Format man page references in SEE ALSO section (e.g., program(1), command(8))
             if (inSeeAlsoSection)
             {
@@ -494,19 +592,19 @@ public class MainWindow
                     // Extract just the program name (without the section number)
                     string fullMatch = match.Value;  // e.g., "aa-stack(8)"
                     string progName = match.Groups[1].Value;  // e.g., "aa-stack"
-                    
+
                     int matchStart = lineStart + match.Index;
                     int matchEnd = matchStart + match.Length;
-                    
+
                     TextIter refStart = buffer.GetIterAtOffset(matchStart);
                     TextIter refEnd = buffer.GetIterAtOffset(matchEnd);
                     buffer.ApplyTag(manReferenceTag, refStart, refEnd);
-                    
+
                     // Store the reference for click handling
                     manPageReferences[(matchStart, matchEnd)] = progName;
                 }
             }
-            
+
             lineStart += lineLength + 1; // +1 for newline character
         }
     }
@@ -526,10 +624,10 @@ public class MainWindow
 
             process.Start();
             process.StandardInput.Close();  // Close stdin immediately
-            
+
             // Use a task with timeout to prevent blocking
             var outputTask = System.Threading.Tasks.Task.Run(() => process.StandardOutput.ReadToEnd());
-            
+
             // Wait for either output or timeout (3 seconds)
             if (!outputTask.Wait(3000))
             {
@@ -537,9 +635,9 @@ public class MainWindow
                 try { process.Kill(); } catch { }
                 return string.Empty;
             }
-            
+
             string output = outputTask.Result;
-            
+
             // Ensure process has exited
             if (!process.HasExited)
             {
@@ -569,7 +667,7 @@ public class MainWindow
 
         TextIter iter = buffer.StartIter;
         TextIter endIter = buffer.EndIter;
-        
+
         while (iter.ForwardSearch(searchLower, 0, out TextIter matchStart, out TextIter matchEnd, endIter))
         {
             searchMatches.Add((matchStart, matchEnd));
@@ -614,7 +712,7 @@ public class MainWindow
         var (start, end) = searchMatches[index];
         manPageView.Buffer.ApplyTag(currentMatchTag, start, end);
         manPageView.ScrollToIter(start, 0.1, false, 0, 0);
-        
+
         string searchTerm = lastSearchTerm ?? "";
         statusLabel.Text = $"Match {index + 1} of {searchMatches.Count} for '{searchTerm}' in {currentLoadedProgram}";
     }
@@ -666,25 +764,25 @@ public class MainWindow
                 }
             }
         }
-        
+
         // Get the typed character from the key
         uint keyval = args.Event.KeyValue;
         char typedChar = (char)Gdk.Keyval.ToUnicode(keyval);
-        
+
         // Only process alphabetic and numeric characters
         if (!char.IsLetterOrDigit(typedChar))
         {
             return;
         }
-        
+
         // Make it lowercase for comparison
         string searchChar = char.ToLower(typedChar).ToString();
-        
+
         // Find the first program starting with this character
         var matchingPrograms = allPrograms
             .Where(p => p.ToLower().StartsWith(searchChar))
             .ToList();
-        
+
         if (matchingPrograms.Count > 0)
         {
             // Find the matching program in the store and select it
@@ -701,7 +799,7 @@ public class MainWindow
                 }
                 return false;
             });
-            
+
             if (found)
             {
                 args.RetVal = true;
@@ -727,17 +825,17 @@ public class MainWindow
         // Get the clicked position
         int x = (int)args.Event.X;
         int y = (int)args.Event.Y;
-        
+
         manPageView.WindowToBufferCoords(Gtk.TextWindowType.Widget, x, y, out int bufferX, out int bufferY);
         manPageView.GetIterAtLocation(out TextIter clickIter, bufferX, bufferY);
         int clickOffset = clickIter.Offset;
-        
+
         // Check if the click is on a man page reference
         foreach (var kvp in manPageReferences)
         {
             var (startOffset, endOffset) = kvp.Key;
             string programName = kvp.Value;
-            
+
             if (clickOffset >= startOffset && clickOffset < endOffset)
             {
                 // Clicked on a man page reference - load that page
@@ -746,7 +844,7 @@ public class MainWindow
                 return;
             }
         }
-        
+
         // When user clicks on the man page view (not on a reference), give focus to search entry
         // so they can immediately start searching
         if (isManPageLoaded)
@@ -771,10 +869,10 @@ public class MainWindow
             }
             return false; // Continue iteration
         });
-        
+
         // Load the man page (even if not found in list, it might still have a man page)
         LoadManPage(programName);
-        
+
         // If not found in the filtered list, it might be filtered out
         if (!foundInList)
         {
@@ -809,29 +907,55 @@ public class MainWindow
 
     private void OnSettingsClicked(object? sender, EventArgs e)
     {
-        var dialog = new SettingsDialog(mainWindow);
-        var response = dialog.Run();
-        
-        if (response == ResponseType.Ok)
+        try
         {
-            // Reload settings
+            // Reload settings before showing dialog
             var oldUseSingleClick = settings.UseSingleClick;
-            settings = Settings.Load();
-            
-            // Update event handlers if click mode changed
-            if (oldUseSingleClick != settings.UseSingleClick)
+            var oldEnableHelpFallback = settings.EnableHelpFallback;
+
+            var (response, newEnableHelpFallback, newUseSingleClick) = SettingsDialog.ShowDialog(mainWindow);
+
+            if (response == ResponseType.Ok)
             {
-                if (settings.UseSingleClick)
+                // Reload settings from disk
+                settings = Settings.Load();
+
+                // Update event handlers if click mode changed
+                if (oldUseSingleClick != newUseSingleClick)
                 {
-                    // Enable single-click
-                    programListView.Selection.Changed += OnProgramSelectionChanged;
+                    if (newUseSingleClick)
+                    {
+                        // Enable single-click
+                        programListView.Selection.Changed += OnProgramSelectionChanged;
+                    }
+                    else
+                    {
+                        // Disable single-click
+                        programListView.Selection.Changed -= OnProgramSelectionChanged;
+                    }
                 }
-                else
+
+                // Reload program list if EnableHelpFallback changed
+                if (oldEnableHelpFallback != newEnableHelpFallback)
                 {
-                    // Disable single-click
-                    programListView.Selection.Changed -= OnProgramSelectionChanged;
+                    Console.WriteLine($"Settings changed: EnableHelpFallback from {oldEnableHelpFallback} to {newEnableHelpFallback}");
+                    statusLabel.Text = "Updating program list...";
+
+                    // Defer the reload slightly to let GTK finish cleaning up the dialog
+                    GLib.Timeout.Add(50, () =>
+                    {
+                        LoadPrograms();
+                        Console.WriteLine("Successfully reloaded programs");
+                        return false; // Don't repeat
+                    });
                 }
             }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error in OnSettingsClicked: {ex.Message}");
+            Console.WriteLine($"Stack trace: {ex.StackTrace}");
+            statusLabel.Text = $"Error updating settings: {ex.Message}";
         }
     }
 
