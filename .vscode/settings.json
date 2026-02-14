@@ -17,5 +17,9 @@
     },
     "[markdown]": {
         "editor.defaultFormatter": "mervin.markdown-formatter"
+    },
+    "chat.tools.terminal.autoApprove": {
+        "dotnet test": true,
+        "dotnet clean": true
     }
 }
