@@ -35,7 +35,7 @@ artifacts/
 
 # VS Code
 *.code-workspac
-.github
+.github/
 
 # IDE
 .idea/
@@ -47,3 +47,5 @@ artifacts/
 .DS_Store
 Thumbs.db
 
+.history
+COMMIT_MSG.txt
