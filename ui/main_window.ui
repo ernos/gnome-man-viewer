@@ -74,6 +74,18 @@
               </packing>
             </child>
             <child>
+              <object class="GtkButton" id="helpButton">
+                <property name="label">Help</property>
+                <property name="can-focus">False</property>
+                <property name="receives-default">False</property>
+              </object>
+              <packing>
+                <property name="expand">False</property>
+                <property name="fill">False</property>
+                <property name="position">5</property>
+              </packing>
+            </child>
+            <child>
               <object class="GtkButton" id="aboutButton">
                 <property name="label">About</property>
                 <property name="can-focus">False</property>
@@ -82,7 +94,7 @@
               <packing>
                 <property name="expand">False</property>
                 <property name="fill">False</property>
-                <property name="position">5</property>
+                <property name="position">6</property>
               </packing>
             </child>
           </object>
@@ -97,40 +109,150 @@
             <property name="can-focus">False</property>
             <property name="position">120</property>
             <child>
-              <object class="GtkBox" id="leftBox">
+              <object class="GtkPaned" id="leftPaned">
                 <property name="can-focus">False</property>
                 <property name="orientation">vertical</property>
-                <property name="spacing">5</property>
+                <property name="position">200</property>
                 <child>
-                  <object class="GtkLabel" id="programListLabel">
+                  <object class="GtkBox" id="favoritesBox">
                     <property name="can-focus">False</property>
-                    <property name="label">Available Programs</property>
-                    <property name="xalign">0</property>
-                  </object>
-                  <packing>
-                    <property name="expand">False</property>
-                    <property name="fill">False</property>
-                    <property name="position">0</property>
-                  </packing>
-                </child>
-                <child>
-                  <object class="GtkScrolledWindow" id="programListScroll">
-                    <property name="can-focus">False</property>
-                    <property name="vexpand">True</property>
+                    <property name="orientation">vertical</property>
+                    <property name="spacing">5</property>
                     <child>
-                      <object class="GtkTreeView" id="programListView">
-                        <property name="can-focus">True</property>
-                        <property name="headers-visible">False</property>
-                        <child internal-child="selection">
-                          <object class="GtkTreeSelection"/>
+                      <object class="GtkBox" id="favoritesHeaderBox">
+                        <property name="can-focus">False</property>
+                        <property name="spacing">5</property>
+                        <child>
+                          <object class="GtkCheckButton" id="showFavoritesCheck">
+                            <property name="can-focus">True</property>
+                            <property name="active">True</property>
+                            <property name="draw-indicator">True</property>
+                          </object>
+                          <packing>
+                            <property name="expand">False</property>
+                            <property name="fill">False</property>
+                            <property name="position">0</property>
+                          </packing>
+                        </child>
+                        <child>
+                          <object class="GtkEventBox" id="favoritesLabelEventBox">
+                            <property name="visible-window">False</property>
+                            <child>
+                              <object class="GtkLabel" id="favoritesLabel">
+                                <property name="can-focus">False</property>
+                                <property name="label">Favorites</property>
+                                <property name="xalign">0</property>
+                              </object>
+                            </child>
+                          </object>
+                          <packing>
+                            <property name="expand">True</property>
+                            <property name="fill">True</property>
+                            <property name="position">1</property>
+                          </packing>
                         </child>
                       </object>
+                      <packing>
+                        <property name="expand">False</property>
+                        <property name="fill">False</property>
+                        <property name="position">0</property>
+                      </packing>
+                    </child>
+                    <child>
+                      <object class="GtkScrolledWindow" id="favoritesListScroll">
+                        <property name="can-focus">False</property>
+                        <property name="vexpand">True</property>
+                        <child>
+                          <object class="GtkTreeView" id="favoritesListView">
+                            <property name="can-focus">True</property>
+                            <property name="headers-visible">False</property>
+                            <child internal-child="selection">
+                              <object class="GtkTreeSelection"/>
+                            </child>
+                          </object>
+                        </child>
+                      </object>
+                      <packing>
+                        <property name="expand">True</property>
+                        <property name="fill">True</property>
+                        <property name="position">1</property>
+                      </packing>
                     </child>
                   </object>
                   <packing>
-                    <property name="expand">True</property>
-                    <property name="fill">True</property>
-                    <property name="position">1</property>
+                    <property name="resize">False</property>
+                    <property name="shrink">True</property>
+                  </packing>
+                </child>
+                <child>
+                  <object class="GtkBox" id="programsBox">
+                    <property name="can-focus">False</property>
+                    <property name="orientation">vertical</property>
+                    <property name="spacing">5</property>
+                    <child>
+                      <object class="GtkBox" id="programsHeaderBox">
+                        <property name="can-focus">False</property>
+                        <property name="spacing">5</property>
+                        <child>
+                          <object class="GtkCheckButton" id="showProgramsCheck">
+                            <property name="can-focus">True</property>
+                            <property name="active">True</property>
+                            <property name="draw-indicator">True</property>
+                          </object>
+                          <packing>
+                            <property name="expand">False</property>
+                            <property name="fill">False</property>
+                            <property name="position">0</property>
+                          </packing>
+                        </child>
+                        <child>
+                          <object class="GtkEventBox" id="programListLabelEventBox">
+                            <property name="visible-window">False</property>
+                            <child>
+                              <object class="GtkLabel" id="programListLabel">
+                                <property name="can-focus">False</property>
+                                <property name="label">Available Programs</property>
+                                <property name="xalign">0</property>
+                              </object>
+                            </child>
+                          </object>
+                          <packing>
+                            <property name="expand">True</property>
+                            <property name="fill">True</property>
+                            <property name="position">1</property>
+                          </packing>
+                        </child>
+                      </object>
+                      <packing>
+                        <property name="expand">False</property>
+                        <property name="fill">False</property>
+                        <property name="position">0</property>
+                      </packing>
+                    </child>
+                    <child>
+                      <object class="GtkScrolledWindow" id="programListScroll">
+                        <property name="can-focus">False</property>
+                        <property name="vexpand">True</property>
+                        <child>
+                          <object class="GtkTreeView" id="programListView">
+                            <property name="can-focus">True</property>
+                            <property name="headers-visible">False</property>
+                            <child internal-child="selection">
+                              <object class="GtkTreeSelection"/>
+                            </child>
+                          </object>
+                        </child>
+                      </object>
+                      <packing>
+                        <property name="expand">True</property>
+                        <property name="fill">True</property>
+                        <property name="position">1</property>
+                      </packing>
+                    </child>
+                  </object>
+                  <packing>
+                    <property name="resize">True</property>
+                    <property name="shrink">True</property>
                   </packing>
                 </child>
               </object>
