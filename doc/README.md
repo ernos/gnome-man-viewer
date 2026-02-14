@@ -1,17 +1,49 @@
 # GMan - GTK# Man Page Viewer
 
-A graphical man page viewer for Linux/X11 environments, written in C# using GTK#. Features context-aware search, text highlighting, help fallback, and command-line integration.
+A graphical man page viewer for Linux/X11 environments, written in C# using GTK#. Features favorites list, smart filtering, advanced search, keyboard navigation, clickable man references, and command-line integration.
 
 ## Features
 
+### Man Page Browsing
 * **Browse man pages** from a list of all available system programs
-* **Search within loaded man pages** with yellow text highlighting
-* **Context-aware search box** - filters program list when no page is loaded, searches page content when one is open
-* **Help fallback** - if no man page exists, automatically shows `program --help` output with a warning banner
+* **Smart program filtering** - only shows programs with man pages (when help fallback disabled)
+* **Favorites list** - save frequently used programs for quick access
+* **Star indicators** - visual markers show which programs are favorited
+* **Dual list view** - separate lists for favorites and all programs with show/hide controls
+* **Clickable man references** - click SEE ALSO references to jump to related pages
 * **Command-line integration** - specify program and search term as CLI arguments
-* **Live filtering** - as you type, the program list updates in real-time
+
+### Search & Navigation
+* **Search within loaded man pages** with yellow text highlighting for all matches
+* **Orange highlight** for current match, yellow for other matches
+* **Next/Previous buttons** for match navigation
+* **Return key** jumps to next search match
+* **Match counter** - "Match X of Y" display in status bar
+* **Live filtering** - program list updates in real-time as you type
+
+### Keyboard Navigation
+* **Multi-character type-ahead** - type up to 5 characters to jump to programs
+* **Single-click or double-click** mode for loading man pages (configurable)
+* **Keyboard shortcuts**:
+  - `+` key - add program to favorites (when in All Programs list)
+  - `-` key - remove program from favorites (when in Favorites list)
+  - `Enter` - load man page from either list
+  - Type letters/numbers - quick jump with type-ahead (1 second buffer)
+* **Contextual tooltips** - hover hints show available keyboard shortcuts
+
+### Display & Interface
+* **Syntax highlighting** - headers, commands, options, arguments, URLs, and file paths
 * **Word wrapping** and scrollable text display
-* **Status bar** for feedback on load state and search results
+* **User-resizable split** - drag divider between favorites and programs lists
+* **Collapsible lists** - hide either list to maximize space
+* **Status bar** - feedback on load state, search results, and keyboard shortcuts
+* **Help fallback** - shows `program --help` output when no man page exists
+
+### Settings & Persistence
+* **Favorites persistence** - automatically saves favorites to `~/.config/gman/settings.conf`
+* **Position preference** - show favorites at top or bottom (configurable)
+* **Click behavior** - choose single-click or double-click to load pages
+* **Help fallback toggle** - enable/disable automatic `--help` execution
 
 ## Planned Future Feature Implementations
 
@@ -32,6 +64,60 @@ A graphical man page viewer for Linux/X11 environments, written in C# using GTK#
 * **Command text scratch pad**: For creating complex commands while you still have the man page visible. You can also check other commands and write down complex combinations of commands and scripts
 
 ## Changelog and release information
+
+### **Version 1.0** - Major Release
+
+**Search Overhaul**
+* Added Previous and Next buttons for match navigation
+* Return key now jumps to next match
+* Current match highlights in orange, other matches in yellow
+* "Match X of Y" counter in status bar
+* Smart button enabling based on search state
+
+**Favorites System**
+* Dedicated favorites list with persistent storage
+* Press `+` to add programs to favorites
+* Press `-` to remove from favorites
+* Star icons indicate favorited programs
+* Show/hide controls for both lists
+* Configurable position (top or bottom)
+* User-resizable split between lists
+* Automatic cleanup of unavailable programs
+
+**Enhanced Keyboard Navigation**
+* Multi-character type-ahead search (up to 5 characters, 1-second buffer)
+* Visual feedback in status bar showing typed characters
+* Prefix matching for quick program jumping
+* Contextual keyboard shortcut hints in status bar
+* Tooltips showing available shortcuts on hover
+
+**Clickable Man References**
+* SEE ALSO section references are now clickable links
+* Click to load referenced man page
+* Automatically selects and scrolls to program in list
+* Styled with blue underline for visibility
+
+**Smart Program Filtering**
+* Only shows programs with man pages when help fallback disabled
+* Queries system man database via `man -k .`
+* Efficient set intersection (handles ~9,000 entries in <1 second)
+* Status bar shows "programs with man pages available"
+* Automatic refresh when settings change
+
+**UI Improvements**
+* Bash completion script for command-line usage
+* Syntax highlighting for headers, commands, options, arguments
+* File paths and URLs highlighted with underlines
+* Collapsible list headers to maximize viewing space
+* Clickable list labels toggle visibility
+
+**Bug Fixes & Stability**
+* Fixed GLib-GObject-CRITICAL errors and crashes (exit code 139)
+* Proper GTK lifecycle management for TreeView models
+* Fixed settings dialog disposal issues
+* Added event loop processing safeguards
+
+    **Released *2026-02-14***
 
 ### **Version 0.3**
 
@@ -321,6 +407,53 @@ gman ls -s malloc
 
 ## Usage and Examples
 
+### Favorites Management
+
+**Adding to Favorites:**
+1. Navigate to a program in the All Programs list
+2. Press the `+` key or hover for tooltip
+3. Program appears in Favorites list with star icon in All Programs
+
+**Removing from Favorites:**
+1. Select program in Favorites list
+2. Press the `-` key
+3. Program removed from Favorites, star icon disappears
+
+**List Visibility:**
+* Click checkboxes or labels to show/hide lists
+* Drag divider to resize split between lists
+* Hidden lists collapse to save space
+* Favorites persist across application restarts
+
+### Keyboard Navigation
+
+**Type-Ahead Search:**
+* Type 1-5 characters quickly (within 1 second)
+* Program list jumps to first match
+* Status bar shows what you've typed
+* Works in both Favorites and All Programs lists
+
+**Keyboard Shortcuts:**
+* `+` - Add selected program to favorites (All Programs list)
+* `-` - Remove selected program from favorites (Favorites list)
+* `Enter` - Load man page for selected program
+* Letters/numbers - Quick jump to matching programs
+* `Return` (in search box) - Jump to next search match
+
+### Search Features
+
+**Within Man Pages:**
+* Type in search box to highlight all matches
+* All matches highlighted in yellow
+* Current match highlighted in orange  
+* Navigate with Previous/Next buttons or Return key
+* Status shows "Match X of Y"
+
+**Clickable References:**
+* Click blue underlined references in SEE ALSO sections
+* Automatically loads referenced man page
+* Program selected and scrolled into view
+
 ### Context-Aware Search
 
 When **no page is loaded:**
@@ -339,6 +472,9 @@ When **a page is loaded:**
 ```bash
 # Open GMan and manually select 'grep'
 gman
+
+# Show built-in help
+gman --help
 
 # Directly open the 'grep' man page
 gman grep
