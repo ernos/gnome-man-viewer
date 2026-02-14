@@ -37,6 +37,10 @@ public class MainWindow
     private string? lastSearchTerm;
     private List<(TextIter start, TextIter end)> searchMatches = new();
     private int currentMatchIndex = -1;
+    private string typeAheadBuffer = "";
+    private uint? typeAheadTimeoutId = null;
+    private string cachedStatusMessage = "";
+    private bool isInTypeAhead = false;
 
     public MainWindow(string? autoLoadProgram = null, string? autoSearchTerm = null)
     {
@@ -346,7 +350,8 @@ public class MainWindow
         // Reattach model after populating
         programListView.Model = programStore;
 
-        statusLabel.Text = $"Found {filtered.Count} program(s)";
+        cachedStatusMessage = $"Found {filtered.Count} program(s)";
+        statusLabel.Text = cachedStatusMessage;
     }
 
     private void OnProgramSelected(object? sender, RowActivatedArgs args)
@@ -364,6 +369,15 @@ public class MainWindow
 
     private void OnProgramSelectionChanged(object? sender, EventArgs e)
     {
+        Console.WriteLine($"DEBUG: OnProgramSelectionChanged fired, isInTypeAhead={isInTypeAhead}");
+
+        // Don't load man page if we're just navigating with type-ahead
+        if (isInTypeAhead)
+        {
+            Console.WriteLine("DEBUG: Skipping LoadManPage because we're in type-ahead mode");
+            return;
+        }
+
         // This handler is only attached when single-click mode is enabled
         if (settings.UseSingleClick && programListView.Selection.GetSelected(out TreeIter iter))
         {
@@ -438,6 +452,13 @@ public class MainWindow
             currentMatchIndex = -1;
             nextButton.Sensitive = false;
             previousButton.Sensitive = false;
+
+            // Clear type-ahead state
+            if (typeAheadTimeoutId.HasValue)
+            {
+                GLib.Source.Remove(typeAheadTimeoutId.Value);
+            }
+            ResetTypeAheadBuffer();
         }
         catch (Exception ex)
         {
@@ -750,12 +771,18 @@ public class MainWindow
     [GLib.ConnectBefore]
     private void OnProgramListKeyPress(object? sender, KeyPressEventArgs args)
     {
+        Console.WriteLine($"DEBUG: OnProgramListKeyPress fired! Key={args.Event.Key}, KeyValue={args.Event.KeyValue}");
+
         // Handle Enter/Return key to load selected program
         if (args.Event.Key == Gdk.Key.Return)
         {
-            if (programListView.Selection.GetSelected(out TreeIter iter))
+            Console.WriteLine("DEBUG: Enter key pressed");
+            // Clear type-ahead state
+            ResetTypeAheadBuffer();
+
+            if (programListView.Selection.GetSelected(out TreeIter selectedIter))
             {
-                var program = programStore.GetValue(iter, 0)?.ToString();
+                var program = programStore.GetValue(selectedIter, 0)?.ToString();
                 if (!string.IsNullOrEmpty(program))
                 {
                     LoadManPage(program);
@@ -769,42 +796,102 @@ public class MainWindow
         uint keyval = args.Event.KeyValue;
         char typedChar = (char)Gdk.Keyval.ToUnicode(keyval);
 
+        Console.WriteLine($"DEBUG: Typed char='{typedChar}' ({(int)typedChar}), IsLetterOrDigit={char.IsLetterOrDigit(typedChar)}");
+
         // Only process alphabetic and numeric characters
         if (!char.IsLetterOrDigit(typedChar))
         {
+            Console.WriteLine("DEBUG: Not alphanumeric, returning");
             return;
         }
 
-        // Make it lowercase for comparison
-        string searchChar = char.ToLower(typedChar).ToString();
+        Console.WriteLine($"DEBUG: Processing character. Buffer before: '{typeAheadBuffer}'");
 
-        // Find the first program starting with this character
-        var matchingPrograms = allPrograms
-            .Where(p => p.ToLower().StartsWith(searchChar))
-            .ToList();
+        // Set flag to prevent OnProgramSelectionChanged from loading man pages
+        isInTypeAhead = true;
 
-        if (matchingPrograms.Count > 0)
+        // Cancel existing timeout if any
+        if (typeAheadTimeoutId.HasValue)
         {
-            // Find the matching program in the store and select it
-            bool found = false;
-            programStore.Foreach((model, path, iter) =>
+            Console.WriteLine($"DEBUG: Cancelling existing timeout {typeAheadTimeoutId.Value}");
+            try
+            {
+                GLib.Source.Remove(typeAheadTimeoutId.Value);
+            }
+            catch
+            {
+                // Timeout may have already fired, ignore
+            }
+            typeAheadTimeoutId = null;
+        }
+
+        // Append character to buffer (limit to 5 characters)
+        typeAheadBuffer += char.ToLower(typedChar);
+        if (typeAheadBuffer.Length > 5)
+        {
+            typeAheadBuffer = typeAheadBuffer.Substring(typeAheadBuffer.Length - 5);
+        }
+
+        Console.WriteLine($"DEBUG: Buffer after append: '{typeAheadBuffer}'");
+
+        // Always show what user has typed so far
+        statusLabel.Text = $"Type-ahead: {typeAheadBuffer}";
+        Console.WriteLine($"DEBUG: Status label set to: '{statusLabel.Text}'");
+
+        // IMPORTANT: Start new timeout IMMEDIATELY before any GTK operations
+        // that might process the event loop and fire the old timeout
+        typeAheadTimeoutId = GLib.Timeout.Add(1000, () =>
+        {
+            Console.WriteLine("DEBUG: Timeout fired, resetting buffer");
+            ResetTypeAheadBuffer();
+            return false; // Don't repeat
+        });
+        Console.WriteLine($"DEBUG: New timeout created: {typeAheadTimeoutId}");
+
+        // Find the first program starting with the buffer in the displayed list
+        // Use manual iteration instead of Foreach to avoid GTK event processing
+        bool found = false;
+        TreeIter iter;
+
+        if (programStore.GetIterFirst(out iter))
+        {
+            do
             {
                 var value = programStore.GetValue(iter, 0)?.ToString();
-                if (value == matchingPrograms[0])
+                if (value != null && value.ToLower().StartsWith(typeAheadBuffer))
                 {
+                    // Found a match - select and scroll
+                    TreePath path = programStore.GetPath(iter);
                     programListView.Selection.SelectPath(path);
-                    programListView.ScrollToCell(path, null, false, 0, 0);
+                    // Use idle callback for scrolling to avoid immediate event processing
+                    GLib.Idle.Add(() =>
+                    {
+                        programListView.ScrollToCell(path, null, false, 0, 0);
+                        return false;
+                    });
                     found = true;
-                    return true;
+                    break;
                 }
-                return false;
-            });
-
-            if (found)
-            {
-                args.RetVal = true;
-            }
+            } while (programStore.IterNext(ref iter));
         }
+
+        if (found)
+        {
+            args.RetVal = true;
+        }
+    }
+
+    private void ResetTypeAheadBuffer()
+    {
+        Console.WriteLine($"DEBUG: ResetTypeAheadBuffer called! Buffer was: '{typeAheadBuffer}'");
+        Console.WriteLine($"DEBUG: Stack trace: {Environment.StackTrace}");
+        typeAheadBuffer = "";
+        typeAheadTimeoutId = null;
+        isInTypeAhead = false;  // Clear the flag
+
+        // Restore status label to cached message (avoid GTK event processing)
+        statusLabel.Text = cachedStatusMessage;
+        Console.WriteLine($"DEBUG: ResetTypeAheadBuffer complete. Buffer now: '{typeAheadBuffer}'");
     }
 
     private void ClearSearchHighlights()
