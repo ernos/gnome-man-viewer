@@ -51,6 +51,7 @@ public class MainWindow
     private readonly ProgramDiscoveryService programDiscovery = new();
     private FavoritesManager favoritesManager = null!; // Initialized after settings loaded
     private readonly SearchManager searchManager = new();
+    private readonly ManPageLoader manPageLoader = new();
     private const string FAVORITE_ICON = "starred";
     private const string NOTES_ICON = "text-x-generic";
     private TextTag highlightTag;
@@ -548,57 +549,44 @@ public class MainWindow
             // Calculate the appropriate width for formatting the man page
             int manWidth = CalculateTextViewCharacterWidth();
 
-            // Try to get man page content
-            string manContent = GetManPageContent(pageName, manWidth);
+            // Load content using the service
+            var result = manPageLoader.LoadContent(pageName, manWidth, settings.EnableHelpFallback);
 
-            if (string.IsNullOrEmpty(manContent))
+            if (!result.Success)
             {
-                // Man page not found, check if we should try --help
-                if (!settings.EnableHelpFallback)
-                {
-                    // Help fallback disabled
-                    statusLabel.Text = $"Error: No manual entry for '{pageName}'";
-                    manPageView.Buffer.Text = $"No manual entry for {pageName}";
-                    isManPageLoaded = false;
-                    currentLoadedProgram = null;
-                    return;
-                }
+                // No content available
+                string message = settings.EnableHelpFallback
+                    ? $"Error: No manual entry for '{pageName}' and no help available"
+                    : $"Error: No manual entry for '{pageName}'";
 
-                // Try --help
-                string helpContent = GetHelpContent(pageName);
-
-                if (string.IsNullOrEmpty(helpContent))
-                {
-                    // No help available either
-                    statusLabel.Text = $"Error: No manual entry for '{pageName}' and no help available";
-                    manPageView.Buffer.Text = $"No manual entry for {pageName}";
-                    isManPageLoaded = false;
-                    currentLoadedProgram = null;
-                    addToFavoritesButton.Sensitive = false;
-                }
-                else
-                {
-                    // Show help with warning banner
-                    string warningBanner = $"⚠️  WARNING: No man page found for '{pageName}'\n" +
-                                          "Showing output from 'program --help' instead.\n" +
-                                          "────────────────────────────────────────────\n\n";
-                    manPageView.Buffer.Text = warningBanner + helpContent;
-                    FormatManPage(pageName);
-                    manLabel.Text = $"Help for {pageName}";
-                    mainWindow.Title = $"GMan - {pageName} --help";
-                    statusLabel.Text = $"Displaying help for: {pageName}";
-                    isManPageLoaded = true;
-                    currentLoadedProgram = pageName;
-                    addToFavoritesButton.Sensitive = true;
-                    LoadNotes(pageName);
-                }
+                statusLabel.Text = message;
+                manPageView.Buffer.Text = $"No manual entry for {pageName}";
+                isManPageLoaded = false;
+                currentLoadedProgram = null;
+                addToFavoritesButton.Sensitive = false;
             }
-            else
+            else if (result.Source == ManPageLoader.ContentSource.HelpFallback)
+            {
+                // Show help with warning banner
+                string warningBanner = $"⚠️  WARNING: No man page found for '{pageName}'\n" +
+                                      "Showing output from 'program --help' instead.\n" +
+                                      "────────────────────────────────────────────\n\n";
+                manPageView.Buffer.Text = warningBanner + result.Content;
+                FormatManPage(pageName);
+                manLabel.Text = $"Help for {pageName}";
+                mainWindow.Title = $"GMan - {pageName} --help";
+                statusLabel.Text = $"Displaying help for: {pageName}";
+                isManPageLoaded = true;
+                currentLoadedProgram = pageName;
+                addToFavoritesButton.Sensitive = true;
+                LoadNotes(pageName);
+            }
+            else  // ManPage source
             {
                 // Man page found
-                manPageView.Buffer.Text = manContent;
+                manPageView.Buffer.Text = result.Content;
                 FormatManPage(pageName);
-                UpdateManPageHeader(manContent, pageName);
+                UpdateManPageHeader(result.Content, pageName);
                 statusLabel.Text = $"Displaying: {pageName}";
                 isManPageLoaded = true;
                 currentLoadedProgram = pageName;
@@ -629,35 +617,7 @@ public class MainWindow
         }
     }
 
-    private string GetManPageContent(string pageName, int width = 80)
-    {
-        try
-        {
-            var process = new System.Diagnostics.Process();
-            process.StartInfo.FileName = "man";
-            process.StartInfo.Arguments = pageName;
-            process.StartInfo.UseShellExecute = false;
-            process.StartInfo.RedirectStandardOutput = true;
-            process.StartInfo.RedirectStandardError = true;
-            process.StartInfo.CreateNoWindow = true;
 
-            // Set MANWIDTH environment variable to format for the correct width
-            process.StartInfo.Environment["MANWIDTH"] = width.ToString();
-
-            process.Start();
-            string output = process.StandardOutput.ReadToEnd();
-            process.WaitForExit();
-
-            // Remove control characters that could cause beeps or other unwanted behavior
-            output = System.Text.RegularExpressions.Regex.Replace(output, @"[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]", "");
-
-            return output;
-        }
-        catch (Exception)
-        {
-            return string.Empty;
-        }
-    }
 
     private int CalculateTextViewCharacterWidth()
     {
@@ -747,51 +707,7 @@ public class MainWindow
         manPageReferences = result.ManPageReferences;
     }
 
-    private string GetHelpContent(string programName)
-    {
-        try
-        {
-            using var process = new System.Diagnostics.Process();
-            process.StartInfo.FileName = programName;
-            process.StartInfo.Arguments = "--help";
-            process.StartInfo.UseShellExecute = false;
-            process.StartInfo.RedirectStandardOutput = true;
-            process.StartInfo.RedirectStandardError = true;
-            process.StartInfo.RedirectStandardInput = true;  // Prevent waiting for input
-            process.StartInfo.CreateNoWindow = true;
 
-            process.Start();
-            process.StandardInput.Close();  // Close stdin immediately
-
-            // Use a task with timeout to prevent blocking
-            var outputTask = System.Threading.Tasks.Task.Run(() => process.StandardOutput.ReadToEnd());
-
-            // Wait for either output or timeout (3 seconds)
-            if (!outputTask.Wait(3000))
-            {
-                // Timeout - kill the process
-                try { process.Kill(); } catch { }
-                return string.Empty;
-            }
-
-            string output = outputTask.Result;
-
-            // Ensure process has exited
-            if (!process.HasExited)
-            {
-                try { process.Kill(); } catch { }
-            }
-
-            // Remove control characters that could cause beeps or other unwanted behavior
-            output = System.Text.RegularExpressions.Regex.Replace(output, @"[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]", "");
-
-            return output;
-        }
-        catch (Exception)
-        {
-            return string.Empty;
-        }
-    }
 
     private void SearchInManPage(string searchTerm)
     {
