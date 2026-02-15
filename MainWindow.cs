@@ -45,10 +45,12 @@ public class MainWindow
     private readonly Box manNotesCheckBox;
     private readonly ListStore programStore;
     private readonly ListStore favoritesStore;
-    private List<string> favorites = new();
     private Settings settings;
     private readonly ManPageFormatter formatter = new();
     private readonly NotesRepository notesRepository = new();
+    private readonly ProgramDiscoveryService programDiscovery = new();
+    private FavoritesManager favoritesManager = null!; // Initialized after settings loaded
+    private readonly SearchManager searchManager = new();
     private const string FAVORITE_ICON = "starred";
     private const string NOTES_ICON = "text-x-generic";
     private TextTag highlightTag;
@@ -65,9 +67,6 @@ public class MainWindow
     private bool isManPageLoaded = false;
     private string? currentLoadedProgram;
     private Dictionary<(int start, int end), string> manPageReferences = new();
-    private string? lastSearchTerm;
-    private List<(TextIter start, TextIter end)> searchMatches = new();
-    private int currentMatchIndex = -1;
     private readonly TypeAheadNavigator typeAheadNavigator = new();
     private uint? typeAheadTimeoutId = null;
     private string cachedStatusMessage = "";
@@ -149,8 +148,8 @@ public class MainWindow
         // Load settings
         settings = Settings.Load();
 
-        // Load favorites from settings
-        favorites = new List<string>(settings.Favorites);
+        // Initialize services that depend on settings
+        favoritesManager = new FavoritesManager(settings);
 
         mainWindow.DeleteEvent += OnDeleteEvent;
         searchEntry.Changed += OnSearchTextChanged;
@@ -358,49 +357,21 @@ public class MainWindow
 
     private void LoadPrograms()
     {
-        //TODO Make this configurable in settin
-        var paths = new[] { "/bin", "/usr/bin", "/usr/local/bin", "/sbin", "/usr/sbin" };
-        var programs = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
+        // Discover programs, filtering by man pages if help fallback is disabled
+        allPrograms = programDiscovery.DiscoverPrograms(filterByManPages: !settings.EnableHelpFallback);
 
-        foreach (var path in paths)
-        {
-            if (Directory.Exists(path))
-            {
-                try
-                {
-                    var files = Directory.GetFiles(path);
-                    foreach (var file in files)
-                    {
-                        programs.Add(System.IO.Path.GetFileName(file));
-                    }
-                }
-                catch { }
-            }
-        }
-
-        // If EnableHelpFallback is false, only show programs with man pages
-        if (!settings.EnableHelpFallback)
-        {
-            var manPages = GetManPageNames();
-            if (manPages.Count > 0)
-            {
-                // Intersect: only programs that exist in both sets
-                var programsWithManPages = programs.Where(p => manPages.Contains(p)).ToList();
-                allPrograms = programsWithManPages;
-                RefreshProgramList("");
-                RefreshFavoritesList();
-                ApplyFavoritesPosition();
-                statusLabel.Text = $"Ready - {allPrograms.Count} programs with man pages available";
-                return;
-            }
-            // If man -k fails, fall through to show all programs
-        }
-
-        allPrograms = programs.ToList();
         RefreshProgramList("");
         RefreshFavoritesList();
         ApplyFavoritesPosition();
-        statusLabel.Text = $"Ready - {allPrograms.Count} programs available";
+
+        if (!settings.EnableHelpFallback)
+        {
+            statusLabel.Text = $"Ready - {allPrograms.Count} programs with man pages available";
+        }
+        else
+        {
+            statusLabel.Text = $"Ready - {allPrograms.Count} programs available";
+        }
     }
 
     private void CleanupFavorites()
@@ -429,79 +400,6 @@ public class MainWindow
                 leftPaned.Pack2(favoritesBox, true, true);
             }
         }
-    }
-
-    private HashSet<string> GetManPageNames()
-    {
-        var manPages = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-        try
-        {
-            var process = new System.Diagnostics.Process
-            {
-                StartInfo = new System.Diagnostics.ProcessStartInfo
-                {
-                    FileName = "man",
-                    Arguments = "-k .",
-                    UseShellExecute = false,
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    CreateNoWindow = true
-                }
-            };
-
-            Console.WriteLine("Starting man -k . query...");
-            process.Start();
-
-            // Read output with timeout
-            var outputTask = System.Threading.Tasks.Task.Run(() => process.StandardOutput.ReadToEnd());
-
-            // Wait up to 5 seconds for man -k to complete
-            if (!outputTask.Wait(5000))
-            {
-                Console.WriteLine("man -k . timed out after 5 seconds");
-                try { process.Kill(); } catch { }
-                return manPages; // Return empty set on timeout
-            }
-
-            string output = outputTask.Result;
-
-            if (!process.HasExited)
-            {
-                try { process.Kill(); } catch { }
-            }
-            else if (process.ExitCode != 0)
-            {
-                Console.WriteLine($"man -k . failed with exit code {process.ExitCode}");
-                return manPages; // Return empty set on failure
-            }
-
-            Console.WriteLine($"man -k . returned {output.Split('\n').Length} lines");
-
-            // Parse output: "program_name (section) - description"
-            // Extract everything before the first space and opening parenthesis
-            foreach (var line in output.Split('\n'))
-            {
-                if (string.IsNullOrWhiteSpace(line))
-                    continue;
-
-                var match = System.Text.RegularExpressions.Regex.Match(line, @"^([^\s(]+)\s*\(");
-                if (match.Success)
-                {
-                    manPages.Add(match.Groups[1].Value);
-                }
-            }
-
-            Console.WriteLine($"Parsed {manPages.Count} unique man page names");
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"Error in GetManPageNames: {ex.Message}");
-            // If man -k fails, return empty set (caller will use all programs)
-            return manPages;
-        }
-
-        return manPages;
     }
 
     private void OnSearchTextChanged(object? sender, EventArgs e)
@@ -542,7 +440,7 @@ public class MainWindow
         foreach (var program in filtered)
         {
             // Column 0: favorite icon (show star if favorited)
-            string favoriteIcon = favorites.Contains(program, StringComparer.OrdinalIgnoreCase) ? FAVORITE_ICON : "";
+            string favoriteIcon = favoritesManager.IsFavorite(program) ? FAVORITE_ICON : "";
             // Column 1: notes icon (show document if has notes)
             string notesIcon = HasNotes(program) ? NOTES_ICON : "";
             // Column 2: program name
@@ -567,8 +465,7 @@ public class MainWindow
         favoritesStore.Clear();
 
         // Show all favorites (including subcommands not in program list), sorted alphabetically
-        var sortedFavorites = favorites.OrderBy(f => f, StringComparer.OrdinalIgnoreCase).ToList();
-        foreach (var favorite in sortedFavorites)
+        foreach (var favorite in favoritesManager.GetSorted())
         {
             favoritesStore.AppendValues(favorite);
         }
@@ -577,18 +474,10 @@ public class MainWindow
         favoritesListView.Model = favoritesStore;
     }
 
-    private void SaveFavorites()
-    {
-        settings.Favorites = new List<string>(favorites);
-        settings.Save();
-    }
-
     private void AddToFavorites(string program)
     {
-        if (!favorites.Contains(program, StringComparer.OrdinalIgnoreCase))
+        if (favoritesManager.Add(program))
         {
-            favorites.Add(program);
-            SaveFavorites();
             RefreshFavoritesList();
             RefreshProgramList(""); // Refresh to show star icon
             statusLabel.Text = $"Added '{program}' to favorites";
@@ -601,10 +490,8 @@ public class MainWindow
 
     private void RemoveFromFavorites(string program)
     {
-        var removed = favorites.RemoveAll(f => string.Equals(f, program, StringComparison.OrdinalIgnoreCase)) > 0;
-        if (removed)
+        if (favoritesManager.Remove(program))
         {
-            SaveFavorites();
             RefreshFavoritesList();
             RefreshProgramList(""); // Refresh to remove star icon
             statusLabel.Text = $"Removed '{program}' from favorites";
@@ -721,9 +608,7 @@ public class MainWindow
 
             // Clear search state when loading a new page
             searchEntry.Text = "";
-            lastSearchTerm = null;
-            searchMatches.Clear();
-            currentMatchIndex = -1;
+            searchManager.Clear();
             nextButton.Sensitive = false;
             previousButton.Sensitive = false;
 
@@ -911,23 +796,10 @@ public class MainWindow
     private void SearchInManPage(string searchTerm)
     {
         ClearSearchHighlights();
-        lastSearchTerm = searchTerm;
-        searchMatches.Clear();
-        currentMatchIndex = -1;
-
         TextBuffer buffer = manPageView.Buffer;
-        string searchLower = searchTerm.ToLower();
+        string text = buffer.Text;
 
-        TextIter iter = buffer.StartIter;
-        TextIter endIter = buffer.EndIter;
-
-        while (iter.ForwardSearch(searchLower, 0, out TextIter matchStart, out TextIter matchEnd, endIter))
-        {
-            searchMatches.Add((matchStart, matchEnd));
-            iter = matchEnd;
-        }
-
-        int matchCount = searchMatches.Count;
+        int matchCount = searchManager.FindMatches(text, searchTerm);
 
         if (matchCount == 0)
         {
@@ -937,57 +809,90 @@ public class MainWindow
         }
         else
         {
-            // Highlight all matches and navigate to first
-            foreach (var (start, end) in searchMatches)
+            // Highlight all matches
+            foreach (var (start, end) in searchManager.GetMatches())
             {
-                buffer.ApplyTag(highlightTag, start, end);
+                TextIter startIter = buffer.GetIterAtOffset(start);
+                TextIter endIter = buffer.GetIterAtOffset(end);
+                buffer.ApplyTag(highlightTag, startIter, endIter);
             }
-            NavigateToMatch(0);
+
+            // Highlight current match
+            HighlightCurrentMatch();
+
             statusLabel.Text = $"Match 1 of {matchCount} for '{searchTerm}' in {currentLoadedProgram}";
             nextButton.Sensitive = true;
             previousButton.Sensitive = true;
         }
     }
 
-    private void NavigateToMatch(int index)
+    private void HighlightCurrentMatch()
     {
-        if (searchMatches.Count == 0 || index < 0 || index >= searchMatches.Count)
+        var currentMatch = searchManager.GetCurrentMatch();
+        if (currentMatch == null)
             return;
 
-        // Remove currentMatchTag from previous match if any
-        if (currentMatchIndex >= 0 && currentMatchIndex < searchMatches.Count)
-        {
-            var (oldStart, oldEnd) = searchMatches[currentMatchIndex];
-            manPageView.Buffer.RemoveTag(currentMatchTag, oldStart, oldEnd);
-        }
+        var (start, end) = currentMatch.Value;
+        TextBuffer buffer = manPageView.Buffer;
+        TextIter startIter = buffer.GetIterAtOffset(start);
+        TextIter endIter = buffer.GetIterAtOffset(end);
 
-        currentMatchIndex = index;
-        var (start, end) = searchMatches[index];
-        manPageView.Buffer.ApplyTag(currentMatchTag, start, end);
-        manPageView.ScrollToIter(start, 0.1, false, 0, 0);
+        buffer.ApplyTag(currentMatchTag, startIter, endIter);
+        manPageView.ScrollToIter(startIter, 0.1, false, 0, 0);
 
-        string searchTerm = lastSearchTerm ?? "";
-        statusLabel.Text = $"Match {index + 1} of {searchMatches.Count} for '{searchTerm}' in {currentLoadedProgram}";
+        int currentIndex = searchManager.CurrentIndex;
+        int matchCount = searchManager.MatchCount;
+        string searchTerm = searchManager.SearchTerm;
+        statusLabel.Text = $"Match {currentIndex + 1} of {matchCount} for '{searchTerm}' in {currentLoadedProgram}";
+    }
+
+    private void NavigateToMatch(int index)
+    {
+        // This method is no longer used - navigation is handled by SearchManager
+        // Kept for backward compatibility if needed
     }
 
     private void OnNextClicked(object? sender, EventArgs e)
     {
-        if (searchMatches.Count == 0)
+        if (!searchManager.HasMatches)
             return;
 
-        int nextIndex = (currentMatchIndex + 1) % searchMatches.Count;
-        NavigateToMatch(nextIndex);
+        // Remove highlight from current match
+        ClearCurrentMatchHighlight();
+
+        // Navigate to next
+        searchManager.NavigateToNext();
+
+        // Highlight new current match
+        HighlightCurrentMatch();
     }
 
     private void OnPreviousClicked(object? sender, EventArgs e)
     {
-        if (searchMatches.Count == 0)
+        if (!searchManager.HasMatches)
             return;
 
-        int prevIndex = currentMatchIndex - 1;
-        if (prevIndex < 0)
-            prevIndex = searchMatches.Count - 1;
-        NavigateToMatch(prevIndex);
+        // Remove highlight from current match
+        ClearCurrentMatchHighlight();
+
+        // Navigate to previous
+        searchManager.NavigateToPrevious();
+
+        // Highlight new current match
+        HighlightCurrentMatch();
+    }
+
+    private void ClearCurrentMatchHighlight()
+    {
+        var currentMatch = searchManager.GetCurrentMatch();
+        if (currentMatch == null)
+            return;
+
+        var (start, end) = currentMatch.Value;
+        TextBuffer buffer = manPageView.Buffer;
+        TextIter startIter = buffer.GetIterAtOffset(start);
+        TextIter endIter = buffer.GetIterAtOffset(end);
+        buffer.RemoveTag(currentMatchTag, startIter, endIter);
     }
 
     private void OnAddToFavoritesClicked(object? sender, EventArgs e)
@@ -1731,9 +1636,7 @@ public class MainWindow
             // Clear any existing search state
             ClearSearchHighlights();
             searchEntry.Text = "";
-            searchMatches.Clear();
-            currentMatchIndex = -1;
-            lastSearchTerm = null;
+            searchManager.Clear();
             manPageReferences.Clear();
 
             // Set the help text
