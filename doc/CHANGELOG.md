@@ -92,7 +92,7 @@ All notable changes to GMan will be documented in this file.
 
 * **Type-ahead improvements**:
   + Increased buffer size constant from 5 to 10 characters
-  + Increased timeout from 1000ms to 5000ms
+  + Increased timeout from 1000ms to 3000ms
   + Added two-stage timeout: 5s delay + 2s visual feedback message
   + Used Pango markup for bold orange styling: `<span foreground='orange' weight='bold'>⏱ Type-ahead timeout - cleared</span>`
 
