@@ -187,7 +187,7 @@ Create file `gman.desktop` :
 
 ```
 [Desktop Entry]
-Version=1.0
+Version=1.1
 Type=Application
 Name=GMan
 Comment=GTK# Man Page Viewer

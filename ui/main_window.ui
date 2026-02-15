@@ -62,6 +62,19 @@
               </packing>
             </child>
             <child>
+              <object class="GtkButton" id="addToFavoritesButton">
+                <property name="label">★ Favorite</property>
+                <property name="can-focus">False</property>
+                <property name="receives-default">False</property>
+                <property name="sensitive">False</property>
+              </object>
+              <packing>
+                <property name="expand">False</property>
+                <property name="fill">False</property>
+                <property name="position">4</property>
+              </packing>
+            </child>
+            <child>
               <object class="GtkButton" id="settingsButton">
                 <property name="label">Settings</property>
                 <property name="can-focus">False</property>
@@ -70,7 +83,7 @@
               <packing>
                 <property name="expand">False</property>
                 <property name="fill">False</property>
-                <property name="position">4</property>
+                <property name="position">5</property>
               </packing>
             </child>
             <child>
@@ -82,7 +95,7 @@
               <packing>
                 <property name="expand">False</property>
                 <property name="fill">False</property>
-                <property name="position">5</property>
+                <property name="position">6</property>
               </packing>
             </child>
             <child>
@@ -94,7 +107,7 @@
               <packing>
                 <property name="expand">False</property>
                 <property name="fill">False</property>
-                <property name="position">6</property>
+                <property name="position">7</property>
               </packing>
             </child>
           </object>
@@ -264,7 +277,7 @@
             <child>
               <object class="GtkPaned" id="rightPaned">
                 <property name="can-focus">False</property>
-                <property name="position">700</property>
+                <property name="position">850</property>
                 <child>
                   <object class="GtkBox" id="manPageBox">
                     <property name="can-focus">False</property>
@@ -272,10 +285,56 @@
                     <property name="orientation">vertical</property>
                     <property name="spacing">5</property>
                     <child>
-                      <object class="GtkLabel" id="manLabel">
+                      <object class="GtkBox" id="manHeaderBox">
                         <property name="can-focus">False</property>
-                        <property name="label">Manual Page</property>
-                        <property name="xalign">0</property>
+                        <property name="spacing">5</property>
+                        <child>
+                          <object class="GtkLabel" id="manLabel">
+                            <property name="can-focus">False</property>
+                            <property name="label">Manual Page</property>
+                            <property name="xalign">0</property>
+                          </object>
+                          <packing>
+                            <property name="expand">True</property>
+                            <property name="fill">True</property>
+                            <property name="position">0</property>
+                          </packing>
+                        </child>
+                        <child>
+                          <object class="GtkBox" id="manNotesCheckBox">
+                            <property name="can-focus">False</property>
+                            <property name="spacing">5</property>
+                            <property name="visible">False</property>
+                            <child>
+                              <object class="GtkLabel" id="manNotesLabel">
+                                <property name="can-focus">False</property>
+                                <property name="label">Show Notes</property>
+                              </object>
+                              <packing>
+                                <property name="expand">False</property>
+                                <property name="fill">False</property>
+                                <property name="position">0</property>
+                              </packing>
+                            </child>
+                            <child>
+                              <object class="GtkCheckButton" id="manNotesCheck">
+                                <property name="can-focus">True</property>
+                                <property name="active">False</property>
+                                <property name="draw-indicator">True</property>
+                              </object>
+                              <packing>
+                                <property name="expand">False</property>
+                                <property name="fill">False</property>
+                                <property name="position">1</property>
+                              </packing>
+                            </child>
+                          </object>
+                          <packing>
+                            <property name="expand">False</property>
+                            <property name="fill">False</property>
+                            <property name="position">1</property>
+                          </packing>
+                        </child>
                       </object>
                       <packing>
                         <property name="expand">False</property>
@@ -306,14 +365,32 @@
                   </packing>
                 </child>
                 <child>
-                  <object class="GtkBox" id="notesBox">
+                  <object class="GtkBox" id="notesContainerBox">
                     <property name="can-focus">False</property>
                     <property name="orientation">vertical</property>
                     <property name="spacing">5</property>
+                    <property name="visible">False</property>
                     <child>
                       <object class="GtkBox" id="notesHeaderBox">
                         <property name="can-focus">False</property>
                         <property name="spacing">5</property>
+                        <child>
+                          <object class="GtkEventBox" id="notesLabelEventBox">
+                            <property name="visible-window">False</property>
+                            <child>
+                              <object class="GtkLabel" id="notesLabel">
+                                <property name="can-focus">False</property>
+                                <property name="label">Hide Notes</property>
+                                <property name="xalign">0</property>
+                              </object>
+                            </child>
+                          </object>
+                          <packing>
+                            <property name="expand">True</property>
+                            <property name="fill">True</property>
+                            <property name="position">0</property>
+                          </packing>
+                        </child>
                         <child>
                           <object class="GtkCheckButton" id="showNotesCheck">
                             <property name="can-focus">True</property>
@@ -323,23 +400,6 @@
                           <packing>
                             <property name="expand">False</property>
                             <property name="fill">False</property>
-                            <property name="position">0</property>
-                          </packing>
-                        </child>
-                        <child>
-                          <object class="GtkEventBox" id="notesLabelEventBox">
-                            <property name="visible-window">False</property>
-                            <child>
-                              <object class="GtkLabel" id="notesLabel">
-                                <property name="can-focus">False</property>
-                                <property name="label">Notes</property>
-                                <property name="xalign">0</property>
-                              </object>
-                            </child>
-                          </object>
-                          <packing>
-                            <property name="expand">True</property>
-                            <property name="fill">True</property>
                             <property name="position">1</property>
                           </packing>
                         </child>
@@ -351,13 +411,27 @@
                       </packing>
                     </child>
                     <child>
-                      <object class="GtkScrolledWindow" id="notesScroll">
+                      <object class="GtkBox" id="notesBox">
                         <property name="can-focus">False</property>
-                        <property name="vexpand">True</property>
+                        <property name="orientation">vertical</property>
+                        <property name="visible">False</property>
                         <child>
-                          <object class="GtkTextView" id="notesView">
-                            <property name="can-focus">True</property>
+                          <object class="GtkScrolledWindow" id="notesScroll">
+                            <property name="can-focus">False</property>
+                            <property name="vexpand">True</property>
+                            <property name="hscrollbar-policy">automatic</property>
+                            <property name="vscrollbar-policy">automatic</property>
+                            <child>
+                              <object class="GtkTextView" id="notesView">
+                                <property name="can-focus">True</property>
+                              </object>
+                            </child>
                           </object>
+                          <packing>
+                            <property name="expand">True</property>
+                            <property name="fill">True</property>
+                            <property name="position">0</property>
+                          </packing>
                         </child>
                       </object>
                       <packing>

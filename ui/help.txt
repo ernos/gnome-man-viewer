@@ -90,7 +90,7 @@ FILES
         Configuration and favorites storage
 
 VERSION
-    GMan 1.0 - February 2026
+    GMan 1.1 - February 2026
 
 AUTHOR
     See https://www.yourdev.net for more information

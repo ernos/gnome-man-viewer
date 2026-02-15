@@ -2,6 +2,106 @@
 
 All notable changes to GMan will be documented in this file.
 
+## [1.1] - 2026-02-15
+
+### Added
+
+* **"Add to Favorites" button in toolbar**: Added button to favorite the currently displayed man page:
+  + Button appears in toolbar between search navigation and settings
+  + Works with any displayed man page, including subcommands not in program list
+  + Enabled only when a man page is loaded
+  + Supports favoriting programs like "nvme-device-smart-scan" that aren't standalone executables
+  + Status bar shows confirmation when program is added to favorites
+
+* **Smart notes panel with collapsible interface**: Completely redesigned notes panel behavior:
+  + Notes panel hidden by default to maximize man page viewing space
+  + "Show Notes" checkbox appears in man page header when notes are hidden
+  + "Hide Notes" checkbox appears in notes panel header when notes are visible
+  + Both checkboxes stay synchronized - toggle either to show/hide notes
+  + Notes panel completely hidden when disabled (no wasted space)
+  + Horizontal and vertical scrollbars for long notes
+  + Notes panel appears to the right with 300px default width
+
+* **Enhanced man page header**: Man page label now displays contextual information:
+  + Shows first line of man page (e.g., "A2ENMOD(8) System Manager's Manual A2ENMOD(8)")
+  + Window title updates to show current man page (e.g., "GMan - A2ENMOD Manual")
+  + Provides instant context about what you're viewing
+
+* **Improved syntax highlighting in man pages**: Enhanced visual hierarchy:
+  + First word on each line in NAME and SYNOPSIS sections highlighted as command
+  + Helps quickly identify program names, subcommands, and primary functions
+  + Consistent purple, bold styling matches command highlighting elsewhere
+
+* **Enhanced type-ahead search**: Significantly improved quick navigation:
+  + Buffer increased from 5 to 10 characters for longer search terms
+  + Timeout extended from 1 to 5 seconds for more comfortable typing
+  + Bold orange timer icon (⏱) with "Type-ahead timeout - cleared" message when buffer resets
+  + Clear visual feedback helps users understand when search buffer was cleared
+  + Works in both programs and favorites lists
+
+### Fixed
+
+* **Man page text width calculation**: Fixed word wrapping and formatting issues:
+  + Calculates actual character width of man page TextView using Pango layout
+  + Sets MANWIDTH environment variable before calling man command
+  + Man pages now properly formatted to match TextView width
+  + Eliminates awkward line breaks and horizontal scrolling
+  + Dynamically adjusts when window is resized
+
+* **Favorites persistence for subcommands**: Fixed favorites not loading for non-listed programs:
+  + Removed filtering that prevented subcommands from appearing in favorites
+  + Favorites list now shows all saved programs, even if not in program scan
+  + Programs like "nvme-device-smart-scan" now persist across restarts
+  + Enables favoriting of man pages accessed via command-line arguments
+
+* **Empty notes file prevention**: Notes files only created when content exists:
+  + No empty files created in `~/.config/gman/notes/` directory
+  + Existing empty files deleted when content cleared
+  + Notes icon (📄) only shows for programs with actual note content
+  + Cleaner file system without unused note files
+
+* **Notes panel visibility**: Fixed multiple issues with notes panel behavior:
+  + Panel properly hidden on startup when setting is disabled
+  + Checkbox and controls remain accessible when panel is hidden
+  + Man page gets full width when notes are hidden
+  + No wasted space or layout glitches
+
+### Technical Details
+
+* **MANWIDTH implementation**:
+  + Added `CalculateTextViewCharacterWidth()` method using Pango layout measurement
+  + Modified `GetManPageContent()` to accept width parameter and set MANWIDTH environment variable
+  + Man pages formatted to exact character width (between 40-200 chars, default 80)
+
+* **Notes panel restructure**:
+  + Split UI into `notesContainerBox` (always visible) and `notesBox` (toggleable)
+  + Added `manNotesCheck` checkbox in man page header for toggling notes
+  + Added `OnManNotesCheckToggled()` handler to sync with main notes checkbox
+  + Updated `UpdateNotesVisibility()` to hide entire container and show controls in header
+  + Added horizontal/vertical scroll policies to notesScroll
+
+* **Favorites persistence changes**:
+  + Modified `CleanupFavorites()` to skip filtering (preserves all favorites)
+  + Removed `CleanupFavorites()` calls from startup sequence
+  + Favorites now loaded directly from settings without validation against program list
+
+* **Man page header updates**:
+  + Added `manLabel` field for displaying man page information
+  + Added `UpdateManPageHeader()` method to extract first line and update window title
+  + Called after successful man page load in `LoadManPage()`
+
+* **Type-ahead improvements**:
+  + Increased buffer size constant from 5 to 10 characters
+  + Increased timeout from 1000ms to 5000ms
+  + Added two-stage timeout: 5s delay + 2s visual feedback message
+  + Used Pango markup for bold orange styling: `<span foreground='orange' weight='bold'>⏱ Type-ahead timeout - cleared</span>`
+
+* **Syntax highlighting enhancement**:
+  + Added `inNameSection` and `inSynopsisSection` boolean flags
+  + Modified section detection in `FormatManPage()` to track NAME and SYNOPSIS
+  + Added regex `^\s*([\S]+)` to match first word after optional whitespace
+  + Applied `commandTag` highlighting to first words in these sections
+
 ## [Unreleased]
 
 ### Added
