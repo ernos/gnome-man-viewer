@@ -153,6 +153,8 @@ public class MainWindow
 
         // Initialize services that depend on settings
         favoritesManager = new FavoritesManager(settings);
+        // Initialize services that depend on settings
+        favoritesManager = new FavoritesManager(settings);
 
         mainWindow.DeleteEvent += OnDeleteEvent;
         searchEntry.Changed += OnSearchTextChanged;
@@ -482,9 +484,10 @@ public class MainWindow
 
         // Show all favorites (including subcommands not in program list), sorted alphabetically
         foreach (var favorite in favoritesManager.GetSorted())
-        {
-            favoritesStore.AppendValues(favorite);
-        }
+            foreach (var favorite in favoritesManager.GetSorted())
+            {
+                favoritesStore.AppendValues(favorite);
+            }
 
         // Reattach model after populating
         favoritesListView.Model = favoritesStore;
@@ -493,25 +496,27 @@ public class MainWindow
     private void AddToFavorites(string program)
     {
         if (favoritesManager.Add(program))
-        {
-            RefreshFavoritesList();
-            RefreshProgramList(""); // Refresh to show star icon
-            statusLabel.Text = $"Added '{program}' to favorites";
-        }
-        else
-        {
-            statusLabel.Text = $"'{program}' is already in favorites";
-        }
+            if (favoritesManager.Add(program))
+            {
+                RefreshFavoritesList();
+                RefreshProgramList(""); // Refresh to show star icon
+                statusLabel.Text = $"Added '{program}' to favorites";
+            }
+            else
+            {
+                statusLabel.Text = $"'{program}' is already in favorites";
+            }
     }
 
     private void RemoveFromFavorites(string program)
     {
         if (favoritesManager.Remove(program))
-        {
-            RefreshFavoritesList();
-            RefreshProgramList(""); // Refresh to remove star icon
-            statusLabel.Text = $"Removed '{program}' from favorites";
-        }
+            if (favoritesManager.Remove(program))
+            {
+                RefreshFavoritesList();
+                RefreshProgramList(""); // Refresh to remove star icon
+                statusLabel.Text = $"Removed '{program}' from favorites";
+            }
     }
 
     private void OnProgramSelected(object? sender, RowActivatedArgs args)
@@ -611,6 +616,7 @@ public class MainWindow
 
             // Clear search state when loading a new page
             searchEntry.Text = "";
+            searchManager.Clear();
             searchManager.Clear();
             nextButton.Sensitive = false;
             previousButton.Sensitive = false;
@@ -731,6 +737,9 @@ public class MainWindow
         string text = buffer.Text;
 
         int matchCount = searchManager.FindMatches(text, searchTerm);
+        string text = buffer.Text;
+
+        int matchCount = searchManager.FindMatches(text, searchTerm);
 
         if (matchCount == 0)
         {
@@ -742,11 +751,20 @@ public class MainWindow
         {
             // Highlight all matches
             foreach (var (start, end) in searchManager.GetMatches())
-            {
-                TextIter startIter = buffer.GetIterAtOffset(start);
-                TextIter endIter = buffer.GetIterAtOffset(end);
-                buffer.ApplyTag(highlightTag, startIter, endIter);
-            }
+                // Highlight all matches
+                foreach (var (start, end) in searchManager.GetMatches())
+                {
+                    TextIter startIter = buffer.GetIterAtOffset(start);
+                    TextIter endIter = buffer.GetIterAtOffset(end);
+                    buffer.ApplyTag(highlightTag, startIter, endIter);
+                    TextIter startIter = buffer.GetIterAtOffset(start);
+                    TextIter endIter = buffer.GetIterAtOffset(end);
+                    buffer.ApplyTag(highlightTag, startIter, endIter);
+                }
+
+            // Highlight current match
+            HighlightCurrentMatch();
+
 
             // Highlight current match
             HighlightCurrentMatch();
@@ -758,11 +776,21 @@ public class MainWindow
     }
 
     private void HighlightCurrentMatch()
+    private void HighlightCurrentMatch()
     {
         var currentMatch = searchManager.GetCurrentMatch();
         if (currentMatch == null)
+            var currentMatch = searchManager.GetCurrentMatch();
+        if (currentMatch == null)
             return;
 
+        var (start, end) = currentMatch.Value;
+        TextBuffer buffer = manPageView.Buffer;
+        TextIter startIter = buffer.GetIterAtOffset(start);
+        TextIter endIter = buffer.GetIterAtOffset(end);
+
+        buffer.ApplyTag(currentMatchTag, startIter, endIter);
+        manPageView.ScrollToIter(startIter, 0.1, false, 0, 0);
         var (start, end) = currentMatch.Value;
         TextBuffer buffer = manPageView.Buffer;
         TextIter startIter = buffer.GetIterAtOffset(start);
@@ -781,13 +809,32 @@ public class MainWindow
     {
         // This method is no longer used - navigation is handled by SearchManager
         // Kept for backward compatibility if needed
+        int currentIndex = searchManager.CurrentIndex;
+        int matchCount = searchManager.MatchCount;
+        string searchTerm = searchManager.SearchTerm;
+        statusLabel.Text = $"Match {currentIndex + 1} of {matchCount} for '{searchTerm}' in {currentLoadedProgram}";
+    }
+
+    private void NavigateToMatch(int index)
+    {
+        // This method is no longer used - navigation is handled by SearchManager
+        // Kept for backward compatibility if needed
     }
 
     private void OnNextClicked(object? sender, EventArgs e)
     {
         if (!searchManager.HasMatches)
-            return;
+            if (!searchManager.HasMatches)
+                return;
 
+        // Remove highlight from current match
+        ClearCurrentMatchHighlight();
+
+        // Navigate to next
+        searchManager.NavigateToNext();
+
+        // Highlight new current match
+        HighlightCurrentMatch();
         // Remove highlight from current match
         ClearCurrentMatchHighlight();
 
@@ -801,8 +848,30 @@ public class MainWindow
     private void OnPreviousClicked(object? sender, EventArgs e)
     {
         if (!searchManager.HasMatches)
+            if (!searchManager.HasMatches)
+                return;
+
+        // Remove highlight from current match
+        ClearCurrentMatchHighlight();
+
+        // Navigate to previous
+        searchManager.NavigateToPrevious();
+
+        // Highlight new current match
+        HighlightCurrentMatch();
+    }
+
+    private void ClearCurrentMatchHighlight()
+    {
+        var currentMatch = searchManager.GetCurrentMatch();
+        if (currentMatch == null)
             return;
 
+        var (start, end) = currentMatch.Value;
+        TextBuffer buffer = manPageView.Buffer;
+        TextIter startIter = buffer.GetIterAtOffset(start);
+        TextIter endIter = buffer.GetIterAtOffset(end);
+        buffer.RemoveTag(currentMatchTag, startIter, endIter);
         // Remove highlight from current match
         ClearCurrentMatchHighlight();
 
@@ -1589,6 +1658,7 @@ public class MainWindow
             // Clear any existing search state
             ClearSearchHighlights();
             searchEntry.Text = "";
+            searchManager.Clear();
             searchManager.Clear();
             manPageReferences.Clear();
 
