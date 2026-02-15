@@ -560,8 +560,9 @@ public class MainWindow
 
         favoritesStore.Clear();
 
-        // Show all favorites (including subcommands not in program list)
-        foreach (var favorite in favorites)
+        // Show all favorites (including subcommands not in program list), sorted alphabetically
+        var sortedFavorites = favorites.OrderBy(f => f, StringComparer.OrdinalIgnoreCase).ToList();
+        foreach (var favorite in sortedFavorites)
         {
             favoritesStore.AppendValues(favorite);
         }

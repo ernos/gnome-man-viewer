@@ -2,8 +2,6 @@
 
 ## Stuff that needs fixing
 
-- **Sorting of the favorites list**: The favorites list should be sorted at program load and also when an item gets added or deleted to the list.
-
 ## Future Feature implementations
 
 ### ~~Textbox for note taking on individual man pages~~ ✓ Completed
