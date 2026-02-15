@@ -102,6 +102,23 @@ All notable changes to GMan will be documented in this file.
   + Added regex `^\s*([\S]+)` to match first word after optional whitespace
   + Applied `commandTag` highlighting to first words in these sections
 
+* **Major refactoring - service extraction** (Phases 1-3):
+  + Extracted 7 service classes from MainWindow (1,189 lines of business logic)
+  + Reduced MainWindow from 2,076 to 1,710 lines (366 lines removed, 17.6% reduction)
+  + Created 199 comprehensive unit tests covering all service layer logic
+  + Services extracted:
+    - ManPageFormatter (319 lines, 67 tests) - Syntax highlighting and formatting
+    - TypeAheadNavigator (112 lines, 20 tests) - Type-ahead buffer and matching
+    - NotesRepository (166 lines, 25 tests) - Notes file persistence
+    - ProgramDiscoveryService (171 lines, 15 tests) - Executable scanning and filtering
+    - FavoritesManager (106 lines, 26 tests) - Favorites CRUD with auto-save
+    - SearchManager (130 lines, 26 tests) - Search state and navigation
+    - ManPageLoader (185 lines, 19 tests) - Man page and help content loading
+  + All services have zero GTK dependencies (100% testable without UI)
+  + Created comprehensive integration testing documentation
+  + Maintained 100% backward compatibility
+  + See [doc/REFACTORING-SUMMARY.md](REFACTORING-SUMMARY.md) for complete details
+
 ## [Unreleased]
 
 ### Added

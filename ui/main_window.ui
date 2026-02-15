@@ -383,7 +383,9 @@
                                 <property name="label">Uncheck to hide notes sideview</property>
                                 <property name="xalign">0</property>
                               </object>
-                            </child>
+                            </child>bulto su    
+                            ls
+                            
                           </object>
                           <packing>
                             <property name="expand">True</property>
