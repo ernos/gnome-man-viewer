@@ -237,6 +237,9 @@ public class MainWindow
         manPageView.WrapMode = WrapMode.Word;
         manPageView.ButtonPressEvent += OnManPageViewClicked;
 
+        // Wire up button release handler for auto-copy feature (copy when user finishes selecting)
+        manPageView.ButtonReleaseEvent += OnManPageViewButtonRelease;
+
         // Set monospace font for man page display
         var cssProvider = new CssProvider();
         cssProvider.LoadFromData("textview { font-family: monospace; font-size: 10pt; }");
@@ -1202,7 +1205,7 @@ public class MainWindow
 
         // IMPORTANT: Start new timeout IMMEDIATELY before any GTK operations
         // that might process the event loop and fire the old timeout
-        typeAheadTimeoutId = GLib.Timeout.Add(5000, () =>
+        typeAheadTimeoutId = GLib.Timeout.Add(3000, () =>
         {
             Console.WriteLine("DEBUG: Timeout fired, resetting buffer");
             // Show clear visual feedback that timeout expired
@@ -1757,6 +1760,51 @@ public class MainWindow
         }
     }
 
+    private void OnManPageViewButtonRelease(object? sender, ButtonReleaseEventArgs args)
+    {
+        // Only auto-copy if the setting is enabled
+        if (!settings.AutoCopySelection)
+            return;
+
+        // Only handle left mouse button release
+        if (args.Event.Button != 1)
+            return;
+
+        Console.WriteLine("DEBUG: OnManPageViewButtonRelease fired, attempting to copy selection to clipboard");
+        try
+        {
+            // Get the selected text
+            TextIter start, end;
+            if (manPageView.Buffer.GetSelectionBounds(out start, out end))
+            {
+                string selectedText = manPageView.Buffer.GetText(start, end, false);
+
+                // Only copy non-empty selections
+                if (!string.IsNullOrWhiteSpace(selectedText))
+                {
+                    // Copy to clipboard
+                    var clipboard = Gtk.Clipboard.Get(Gdk.Atom.Intern("CLIPBOARD", false));
+                    clipboard.Text = selectedText;
+
+                    string statusText = $"'{selectedText}'";
+                    if (statusText.Length > 200)
+                    {
+                        statusText = statusText.Substring(0, 200);
+                    }
+                    statusText = $"Selection was copied to clipboard! - {statusText}";
+                    statusLabel.Text = statusText;
+
+                    Console.WriteLine($"DEBUG: Copied to clipboard: '{selectedText}'");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            // Silently ignore clipboard errors to avoid disrupting the user
+            Console.WriteLine($"Error copying to clipboard: {ex.Message}");
+        }
+    }
+
     private void LoadManPageAndSelect(string programName)
     {
         // First, try to find and select the program in the list
@@ -1939,8 +1987,9 @@ public class MainWindow
             var oldUseSingleClick = settings.UseSingleClick;
             var oldEnableHelpFallback = settings.EnableHelpFallback;
             var oldFavoritesAtTop = settings.FavoritesAtTop;
+            var oldAutoCopySelection = settings.AutoCopySelection;
 
-            var (response, newEnableHelpFallback, newUseSingleClick, newFavoritesAtTop) = SettingsDialog.ShowDialog(mainWindow);
+            var (response, newEnableHelpFallback, newUseSingleClick, newFavoritesAtTop, newAutoCopySelection) = SettingsDialog.ShowDialog(mainWindow);
 
             if (response == ResponseType.Ok)
             {
