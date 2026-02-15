@@ -35,7 +35,7 @@ artifacts/
 
 # VS Code
 *.code-workspac
-.github/
+.github/copilot-instructions.md
 
 # IDE
 .idea/

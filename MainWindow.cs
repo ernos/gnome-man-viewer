@@ -47,6 +47,8 @@ public class MainWindow
     private readonly ListStore favoritesStore;
     private List<string> favorites = new();
     private Settings settings;
+    private readonly ManPageFormatter formatter = new();
+    private readonly NotesRepository notesRepository = new();
     private const string FAVORITE_ICON = "starred";
     private const string NOTES_ICON = "text-x-generic";
     private TextTag highlightTag;
@@ -66,10 +68,9 @@ public class MainWindow
     private string? lastSearchTerm;
     private List<(TextIter start, TextIter end)> searchMatches = new();
     private int currentMatchIndex = -1;
-    private string typeAheadBuffer = "";
+    private readonly TypeAheadNavigator typeAheadNavigator = new();
     private uint? typeAheadTimeoutId = null;
     private string cachedStatusMessage = "";
-    private bool isInTypeAhead = false;
     private int lastPanedPosition = 200; // Store the last user-set paned position
 
     public MainWindow(string? autoLoadProgram = null, string? autoSearchTerm = null)
@@ -250,6 +251,9 @@ public class MainWindow
         notesView.StyleContext.AddProvider(cssProvider, StyleProviderPriority.Application);
         notesView.Buffer.Changed += OnNotesChanged;
 
+        // Wire up notes repository event to refresh program list when notes status changes
+        notesRepository.NotesStatusChanged += (sender, programName) => RefreshProgramList("");
+
         // Create highlight tag for search matches
         highlightTag = new TextTag("highlight");
         highlightTag.Background = "yellow";
@@ -262,44 +266,46 @@ public class MainWindow
         currentMatchTag.Foreground = "black";
         manPageView.Buffer.TagTable.Add(currentMatchTag);
 
-        // Create formatting tags for man pages
-        headerTag = new TextTag("header");
-        headerTag.Foreground = "#2E86AB";  // Blue
+        // Create formatting tags for man pages using ManPageFormatter styles
+        var tagStyles = ManPageFormatter.GetDefaultTagStyles();
+
+        headerTag = new TextTag(ManPageFormatter.HeaderTag);
+        headerTag.Foreground = tagStyles[ManPageFormatter.HeaderTag].Foreground;
         headerTag.Weight = Pango.Weight.Bold;
-        headerTag.Scale = 1.3;
+        headerTag.Scale = tagStyles[ManPageFormatter.HeaderTag].Scale;
         manPageView.Buffer.TagTable.Add(headerTag);
 
-        commandTag = new TextTag("command");
-        commandTag.Foreground = "#A23B72";  // Purple
+        commandTag = new TextTag(ManPageFormatter.CommandTag);
+        commandTag.Foreground = tagStyles[ManPageFormatter.CommandTag].Foreground;
         commandTag.Weight = Pango.Weight.Bold;
         manPageView.Buffer.TagTable.Add(commandTag);
 
-        optionTag = new TextTag("option");
-        optionTag.Foreground = "#F18F01";  // Orange
+        optionTag = new TextTag(ManPageFormatter.OptionTag);
+        optionTag.Foreground = tagStyles[ManPageFormatter.OptionTag].Foreground;
         optionTag.Weight = Pango.Weight.Bold;
         manPageView.Buffer.TagTable.Add(optionTag);
 
-        argumentTag = new TextTag("argument");
-        argumentTag.Foreground = "#C73E1D";  // Red
+        argumentTag = new TextTag(ManPageFormatter.ArgumentTag);
+        argumentTag.Foreground = tagStyles[ManPageFormatter.ArgumentTag].Foreground;
         argumentTag.Style = Pango.Style.Italic;
         manPageView.Buffer.TagTable.Add(argumentTag);
 
-        boldTag = new TextTag("bold");
+        boldTag = new TextTag(ManPageFormatter.BoldTag);
         boldTag.Weight = Pango.Weight.Bold;
         manPageView.Buffer.TagTable.Add(boldTag);
 
-        filePathTag = new TextTag("filePath");
-        filePathTag.Foreground = "#06A77D";  // Teal/Green
+        filePathTag = new TextTag(ManPageFormatter.FilePathTag);
+        filePathTag.Foreground = tagStyles[ManPageFormatter.FilePathTag].Foreground;
         filePathTag.Underline = Pango.Underline.Single;
         manPageView.Buffer.TagTable.Add(filePathTag);
 
-        urlTag = new TextTag("url");
-        urlTag.Foreground = "#0077CC";  // Blue
+        urlTag = new TextTag(ManPageFormatter.UrlTag);
+        urlTag.Foreground = tagStyles[ManPageFormatter.UrlTag].Foreground;
         urlTag.Underline = Pango.Underline.Single;
         manPageView.Buffer.TagTable.Add(urlTag);
 
-        manReferenceTag = new TextTag("manReference");
-        manReferenceTag.Foreground = "#0077CC";  // Blue
+        manReferenceTag = new TextTag(ManPageFormatter.ManReferenceTag);
+        manReferenceTag.Foreground = tagStyles[ManPageFormatter.ManReferenceTag].Foreground;
         manReferenceTag.Underline = Pango.Underline.Single;
         manPageView.Buffer.TagTable.Add(manReferenceTag);
 
@@ -620,10 +626,10 @@ public class MainWindow
 
     private void OnProgramSelectionChanged(object? sender, EventArgs e)
     {
-        Console.WriteLine($"DEBUG: OnProgramSelectionChanged fired, isInTypeAhead={isInTypeAhead}");
+        Console.WriteLine($"DEBUG: OnProgramSelectionChanged fired, isInTypeAhead={typeAheadNavigator.IsActive}");
 
         // Don't load man page if we're just navigating with type-ahead
-        if (isInTypeAhead)
+        if (typeAheadNavigator.IsActive)
         {
             Console.WriteLine("DEBUG: Skipping LoadManPage because we're in type-ahead mode");
             return;
@@ -831,146 +837,29 @@ public class MainWindow
 
     private void FormatManPage(string programName)
     {
-        TextBuffer buffer = manPageView.Buffer;
-        string text = buffer.Text;
-        string[] lines = text.Split('\n');
-
         // Clear man page references
         manPageReferences.Clear();
 
-        int lineStart = 0;
-        bool inSeeAlsoSection = false;
-        bool inNameSection = false;
-        bool inSynopsisSection = false;
-
-        foreach (string line in lines)
+        // Create adapter and tag lookup
+        var tagLookup = new Dictionary<string, TextTag>
         {
-            int lineLength = line.Length;
-            TextIter start = buffer.GetIterAtOffset(lineStart);
-            TextIter end = buffer.GetIterAtOffset(lineStart + lineLength);
+            [ManPageFormatter.HeaderTag] = headerTag,
+            [ManPageFormatter.CommandTag] = commandTag,
+            [ManPageFormatter.OptionTag] = optionTag,
+            [ManPageFormatter.ArgumentTag] = argumentTag,
+            [ManPageFormatter.BoldTag] = boldTag,
+            [ManPageFormatter.FilePathTag] = filePathTag,
+            [ManPageFormatter.UrlTag] = urlTag,
+            [ManPageFormatter.ManReferenceTag] = manReferenceTag
+        };
 
-            // Format section headers (all caps words at start of line)
-            if (System.Text.RegularExpressions.Regex.IsMatch(line, @"^[A-Z][A-Z\s]+$") && line.Trim().Length > 0)
-            {
-                buffer.ApplyTag(headerTag, start, end);
+        var adapter = new GtkTextBufferAdapter(manPageView.Buffer, tagLookup);
 
-                // Check which section we're in
-                string trimmedLine = line.Trim();
-                inSeeAlsoSection = (trimmedLine == "SEE ALSO");
-                inNameSection = (trimmedLine == "NAME");
-                inSynopsisSection = (trimmedLine == "SYNOPSIS");
-            }
-            // Highlight first word on line in NAME and SYNOPSIS sections
-            else if ((inNameSection || inSynopsisSection) && !string.IsNullOrWhiteSpace(line))
-            {
-                // Extract first word (sequence of non-whitespace characters at start of line after optional whitespace)
-                var firstWordMatch = System.Text.RegularExpressions.Regex.Match(line, @"^\s*([\S]+)");
-                if (firstWordMatch.Success)
-                {
-                    var wordGroup = firstWordMatch.Groups[1];
-                    TextIter wordStart = buffer.GetIterAtOffset(lineStart + wordGroup.Index);
-                    TextIter wordEnd = buffer.GetIterAtOffset(lineStart + wordGroup.Index + wordGroup.Length);
-                    buffer.ApplyTag(commandTag, wordStart, wordEnd);
-                }
-            }
-            // Format command names (program name in various contexts)
-            // Skip lines that look like man page headers/footers: COMMAND(8)...COMMAND(8)
-            else if (line.Contains(programName) && !System.Text.RegularExpressions.Regex.IsMatch(line, @"^\S+\(\d+\).*\S+\(\d+\)\s*$"))
-            {
-                int index = 0;
-                while ((index = line.IndexOf(programName, index)) != -1)
-                {
-                    // Check if this is a whole word match (word boundaries before and after)
-                    bool isWordBoundaryBefore = index == 0 || char.IsWhiteSpace(line[index - 1]) || char.IsPunctuation(line[index - 1]);
-                    bool isWordBoundaryAfter = (index + programName.Length >= line.Length) ||
-                    char.IsWhiteSpace(line[index + programName.Length]) ||
-                    char.IsPunctuation(line[index + programName.Length]);
+        // Use formatter to apply tags
+        var result = formatter.FormatManPage(adapter, programName);
 
-                    if (isWordBoundaryBefore && isWordBoundaryAfter)
-                    {
-                        TextIter cmdStart = buffer.GetIterAtOffset(lineStart + index);
-                        TextIter cmdEnd = buffer.GetIterAtOffset(lineStart + index + programName.Length);
-                        buffer.ApplyTag(commandTag, cmdStart, cmdEnd);
-                    }
-                    index += programName.Length;
-                }
-            }
-
-            // Format options and arguments using regex
-            // Match options: -x, -?, -x=value, --option, --option=value, -arj, -box, etc.
-            // Can be inside brackets [] or braces {}, separated by pipes |
-            // Values can contain brackets/braces/pipes for syntax (e.g., --opt=[val1|val2])
-            var optionMatches = System.Text.RegularExpressions.Regex.Matches(line,
-            @"(?<=^|\s|\[|\{|\||,)(-[-a-zA-Z0-9?]+(?:=\[[^\]]+\]|=[^\s,\[\]]+)?|--[a-zA-Z][-a-zA-Z0-9\u2010]*(?:=\[[^\]]+\]|=[^\s,\[\]]+|\[[^\]]+\])?)(?=[\s,\[\]\{\}\|]|$)");
-            // ...existing code...
-            foreach (System.Text.RegularExpressions.Match match in optionMatches)
-            {
-                TextIter optStart = buffer.GetIterAtOffset(lineStart + match.Index);
-                TextIter optEnd = buffer.GetIterAtOffset(lineStart + match.Index + match.Length);
-                buffer.ApplyTag(optionTag, optStart, optEnd);
-            }
-
-            // Format argument placeholders
-            // Match: <WORD>, UPPERCASE_WORDS, single lowercase letter before comma, 
-            // lowercase_with_underscores_or-dashes, lowercase words after dash options with special chars
-            var argMatches = System.Text.RegularExpressions.Regex.Matches(line,
-            @"<[A-Z_][A-Z_0-9]*>|(?<![a-zA-Z])[A-Z][A-Z_0-9]+(?![a-zA-Z])|(?<=^|\s)[a-z](?=,\s)|(?<=^|\s)[a-z][a-z0-9]*[_\-][a-z0-9_\-:<>\[\]]*|(?<=-[a-zA-Z0-9?]+\s)[a-z][a-z0-9\-:<>\[\]]*");
-            foreach (System.Text.RegularExpressions.Match match in argMatches)
-            {
-                TextIter argStart = buffer.GetIterAtOffset(lineStart + match.Index);
-                TextIter argEnd = buffer.GetIterAtOffset(lineStart + match.Index + match.Length);
-                buffer.ApplyTag(argumentTag, argStart, argEnd);
-            }
-
-            // Format URLs (http:// or https://)
-            var urlMatches = System.Text.RegularExpressions.Regex.Matches(line, @"https?://[^\s<>\[\]]+");
-            foreach (System.Text.RegularExpressions.Match match in urlMatches)
-            {
-                TextIter urlStart = buffer.GetIterAtOffset(lineStart + match.Index);
-                TextIter urlEnd = buffer.GetIterAtOffset(lineStart + match.Index + match.Length);
-                buffer.ApplyTag(urlTag, urlStart, urlEnd);
-            }
-
-            // Format file paths (starting with / or ~/)
-            var filePathMatches = System.Text.RegularExpressions.Regex.Matches(line, @"(?:^|\s)(~?/[/\w\-\.]+)");
-            foreach (System.Text.RegularExpressions.Match match in filePathMatches)
-            {
-                // Use Group 1 to skip the leading whitespace
-                if (match.Groups.Count > 1)
-                {
-                    var pathGroup = match.Groups[1];
-                    TextIter pathStart = buffer.GetIterAtOffset(lineStart + pathGroup.Index);
-                    TextIter pathEnd = buffer.GetIterAtOffset(lineStart + pathGroup.Index + pathGroup.Length);
-                    buffer.ApplyTag(filePathTag, pathStart, pathEnd);
-                }
-            }
-
-            // Format man page references in SEE ALSO section (e.g., program(1), command(8))
-            //if (inSeeAlsoSection)
-            //{
-            // Match pattern: word-characters followed by (number)
-            // This matches: aa-stack(8), apparmor(7), aa_change_profile(3), etc.
-            var manRefMatches = System.Text.RegularExpressions.Regex.Matches(line, @"([a-zA-Z0-9_\-\.]+)\(\d+\)");
-            foreach (System.Text.RegularExpressions.Match match in manRefMatches)
-            {
-                // Extract just the program name (without the section number)
-                string fullMatch = match.Value;  // e.g., "aa-stack(8)"
-                string progName = match.Groups[1].Value;  // e.g., "aa-stack"
-
-                int matchStart = lineStart + match.Index;
-                int matchEnd = matchStart + match.Length;
-
-                TextIter refStart = buffer.GetIterAtOffset(matchStart);
-                TextIter refEnd = buffer.GetIterAtOffset(matchEnd);
-                buffer.ApplyTag(manReferenceTag, refStart, refEnd);
-
-                // Store the reference for click handling
-                manPageReferences[(matchStart, matchEnd)] = progName;
-            }
-            //}
-
-            lineStart += lineLength + 1; // +1 for newline character
-        }
+        // Store man page references for click handling
+        manPageReferences = result.ManPageReferences;
     }
 
     private string GetHelpContent(string programName)
@@ -1171,10 +1060,7 @@ public class MainWindow
             return;
         }
 
-        Console.WriteLine($"DEBUG: Processing character. Buffer before: '{typeAheadBuffer}'");
-
-        // Set flag to prevent OnProgramSelectionChanged from loading man pages
-        isInTypeAhead = true;
+        Console.WriteLine($"DEBUG: Processing character. Buffer before: '{typeAheadNavigator.Buffer}'");
 
         // Cancel existing timeout if any
         if (typeAheadTimeoutId.HasValue)
@@ -1191,17 +1077,13 @@ public class MainWindow
             typeAheadTimeoutId = null;
         }
 
-        // Append character to buffer (limit to 10 characters)
-        typeAheadBuffer += char.ToLower(typedChar);
-        if (typeAheadBuffer.Length > 10)
-        {
-            typeAheadBuffer = typeAheadBuffer.Substring(typeAheadBuffer.Length - 10);
-        }
+        // Append character to navigator
+        typeAheadNavigator.AppendChar(typedChar);
 
-        Console.WriteLine($"DEBUG: Buffer after append: '{typeAheadBuffer}'");
+        Console.WriteLine($"DEBUG: Buffer after append: '{typeAheadNavigator.Buffer}'");
 
         // Always show what user has typed so far
-        statusLabel.Text = $"Type-ahead: {typeAheadBuffer}";
+        statusLabel.Text = typeAheadNavigator.GetStatusMessage();
         Console.WriteLine($"DEBUG: Status label set to: '{statusLabel.Text}'");
 
         // IMPORTANT: Start new timeout IMMEDIATELY before any GTK operations
@@ -1210,7 +1092,7 @@ public class MainWindow
         {
             Console.WriteLine("DEBUG: Timeout fired, resetting buffer");
             // Show clear visual feedback that timeout expired
-            statusLabel.Markup = "<span foreground='orange' weight='bold'>⏱ Type-ahead timeout - cleared</span>";
+            statusLabel.Markup = typeAheadNavigator.GetTimeoutMessage();
             GLib.Timeout.Add(2000, () =>
             {
                 ResetTypeAheadBuffer();
@@ -1221,35 +1103,44 @@ public class MainWindow
         Console.WriteLine($"DEBUG: New timeout created: {typeAheadTimeoutId}");
 
         // Find the first program starting with the buffer in the displayed list
-        // Use manual iteration instead of Foreach to avoid GTK event processing
-        bool found = false;
+        // Collect items from TreeView
+        var items = new List<string>();
         TreeIter iter;
-
         if (programStore.GetIterFirst(out iter))
         {
             do
             {
                 var value = programStore.GetValue(iter, 2)?.ToString(); // Column 2 is text
-                if (value != null && value.ToLower().StartsWith(typeAheadBuffer))
-                {
-                    // Found a match - select and scroll
-                    TreePath path = programStore.GetPath(iter);
-                    programListView.Selection.SelectPath(path);
-                    // Use idle callback for scrolling to avoid immediate event processing
-                    GLib.Idle.Add(() =>
-                    {
-                        programListView.ScrollToCell(path, null, false, 0, 0);
-                        return false;
-                    });
-                    found = true;
-                    break;
-                }
+                items.Add(value ?? "");
             } while (programStore.IterNext(ref iter));
         }
 
-        if (found)
+        // Use navigator to find match
+        var matchIndex = typeAheadNavigator.FindMatch(items);
+        if (matchIndex.HasValue)
         {
-            args.RetVal = true;
+            // Navigate to the match
+            if (programStore.GetIterFirst(out iter))
+            {
+                int currentIndex = 0;
+                do
+                {
+                    if (currentIndex == matchIndex.Value)
+                    {
+                        TreePath path = programStore.GetPath(iter);
+                        programListView.Selection.SelectPath(path);
+                        // Use idle callback for scrolling to avoid immediate event processing
+                        GLib.Idle.Add(() =>
+                        {
+                            programListView.ScrollToCell(path, null, false, 0, 0);
+                            return false;
+                        });
+                        args.RetVal = true;
+                        break;
+                    }
+                    currentIndex++;
+                } while (programStore.IterNext(ref iter));
+            }
         }
     }
 
@@ -1295,8 +1186,6 @@ public class MainWindow
             return;
         }
 
-        isInTypeAhead = true;
-
         if (typeAheadTimeoutId.HasValue)
         {
             try
@@ -1307,18 +1196,14 @@ public class MainWindow
             typeAheadTimeoutId = null;
         }
 
-        typeAheadBuffer += char.ToLower(typedChar);
-        if (typeAheadBuffer.Length > 10)
-        {
-            typeAheadBuffer = typeAheadBuffer.Substring(typeAheadBuffer.Length - 10);
-        }
+        typeAheadNavigator.AppendChar(typedChar);
 
-        statusLabel.Text = $"Type-ahead: {typeAheadBuffer}";
+        statusLabel.Text = typeAheadNavigator.GetStatusMessage();
 
         typeAheadTimeoutId = GLib.Timeout.Add(5000, () =>
         {
             // Show clear visual feedback that timeout expired
-            statusLabel.Markup = "<span foreground='orange' weight='bold'>⏱ Type-ahead timeout - cleared</span>";
+            statusLabel.Markup = typeAheadNavigator.GetTimeoutMessage();
             GLib.Timeout.Add(2000, () =>
             {
                 ResetTypeAheadBuffer();
@@ -1327,33 +1212,43 @@ public class MainWindow
             return false;
         });
 
-        // Find first favorite starting with buffer
-        bool found = false;
+        // Collect items from TreeView
+        var items = new List<string>();
         TreeIter iter;
-
         if (favoritesStore.GetIterFirst(out iter))
         {
             do
             {
                 var value = favoritesStore.GetValue(iter, 0)?.ToString();
-                if (value != null && value.ToLower().StartsWith(typeAheadBuffer))
-                {
-                    TreePath path = favoritesStore.GetPath(iter);
-                    favoritesListView.Selection.SelectPath(path);
-                    GLib.Idle.Add(() =>
-                    {
-                        favoritesListView.ScrollToCell(path, null, false, 0, 0);
-                        return false;
-                    });
-                    found = true;
-                    break;
-                }
+                items.Add(value ?? "");
             } while (favoritesStore.IterNext(ref iter));
         }
 
-        if (found)
+        // Use navigator to find match
+        var matchIndex = typeAheadNavigator.FindMatch(items);
+        if (matchIndex.HasValue)
         {
-            args.RetVal = true;
+            // Navigate to the match
+            if (favoritesStore.GetIterFirst(out iter))
+            {
+                int currentIndex = 0;
+                do
+                {
+                    if (currentIndex == matchIndex.Value)
+                    {
+                        TreePath path = favoritesStore.GetPath(iter);
+                        favoritesListView.Selection.SelectPath(path);
+                        GLib.Idle.Add(() =>
+                        {
+                            favoritesListView.ScrollToCell(path, null, false, 0, 0);
+                            return false;
+                        });
+                        args.RetVal = true;
+                        break;
+                    }
+                    currentIndex++;
+                } while (favoritesStore.IterNext(ref iter));
+            }
         }
     }
 
@@ -1373,7 +1268,7 @@ public class MainWindow
     private void OnFavoritesSelectionChanged(object? sender, EventArgs e)
     {
         // Don't load man page if we're just navigating with type-ahead
-        if (isInTypeAhead)
+        if (typeAheadNavigator.IsActive)
         {
             return;
         }
@@ -1551,17 +1446,8 @@ public class MainWindow
     {
         try
         {
-            var notesPath = GetNotesPath(programName);
-
-            if (File.Exists(notesPath))
-            {
-                var content = File.ReadAllText(notesPath);
-                notesView.Buffer.Text = content;
-            }
-            else
-            {
-                notesView.Buffer.Text = "";
-            }
+            var content = notesRepository.Load(programName);
+            notesView.Buffer.Text = content;
         }
         catch (Exception ex)
         {
@@ -1574,36 +1460,8 @@ public class MainWindow
     {
         try
         {
-            var notesPath = GetNotesPath(programName);
-            var notesDir = Path.GetDirectoryName(notesPath);
             var content = notesView.Buffer.Text;
-
-            // Check if notes file existed before
-            bool hadNotesBefore = File.Exists(notesPath);
-
-            // Only save if content is not empty
-            if (!string.IsNullOrWhiteSpace(content))
-            {
-                // Create directory if it doesn't exist
-                if (!string.IsNullOrEmpty(notesDir) && !Directory.Exists(notesDir))
-                {
-                    Directory.CreateDirectory(notesDir);
-                }
-
-                File.WriteAllText(notesPath, content);
-
-                // If this is the first time notes are being saved, refresh the program list to show the icon
-                if (!hadNotesBefore)
-                {
-                    RefreshProgramList("");
-                }
-            }
-            else if (hadNotesBefore)
-            {
-                // If content is empty but file exists, delete the file
-                File.Delete(notesPath);
-                RefreshProgramList(""); // Refresh to remove the icon
-            }
+            notesRepository.Save(programName, content);
         }
         catch (Exception ex)
         {
@@ -1611,20 +1469,9 @@ public class MainWindow
         }
     }
 
-    private string GetNotesPath(string programName)
-    {
-        var notesDir = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-            ".config",
-            "gman",
-            "notes"
-        );
-        return Path.Combine(notesDir, $"{programName}.txt");
-    }
-
     private bool HasNotes(string programName)
     {
-        return File.Exists(GetNotesPath(programName));
+        return notesRepository.HasNotes(programName);
     }
 
     private void OnProgramListFocusIn(object? sender, FocusInEventArgs args)
@@ -1704,15 +1551,14 @@ public class MainWindow
 
     private void ResetTypeAheadBuffer()
     {
-        Console.WriteLine($"DEBUG: ResetTypeAheadBuffer called! Buffer was: '{typeAheadBuffer}'");
+        Console.WriteLine($"DEBUG: ResetTypeAheadBuffer called! Buffer was: '{typeAheadNavigator.Buffer}'");
         Console.WriteLine($"DEBUG: Stack trace: {Environment.StackTrace}");
-        typeAheadBuffer = "";
+        typeAheadNavigator.Reset();
         typeAheadTimeoutId = null;
-        isInTypeAhead = false;  // Clear the flag
 
         // Restore status label to cached message (avoid GTK event processing)
         statusLabel.Text = cachedStatusMessage;
-        Console.WriteLine($"DEBUG: ResetTypeAheadBuffer complete. Buffer now: '{typeAheadBuffer}'");
+        Console.WriteLine($"DEBUG: ResetTypeAheadBuffer complete. Buffer now: '{typeAheadNavigator.Buffer}'");
     }
 
     private void ClearSearchHighlights()
@@ -1853,7 +1699,7 @@ public class MainWindow
         {
             ProgramName = "GMan",
             Version = version,
-            Comments = "GTK# man page viewer for X11/Linux",
+            Comments = "A graphical man page viewer for Linux/X11 environments, written in C# using GTK#. Features favorites list, smart filtering, advanced search, keyboard navigation, clickable man references, nicely colored and formatted text in the manuals and command-line integration.",
             Website = "https://www.yourdev.net/gnome-man-viewer",
             Authors = new[] { "Maximilian Cornett <max@yourdev.net>",
                             "https://www.yourdev.net" }
@@ -1908,76 +1754,19 @@ public class MainWindow
 
     private void FormatHelpText()
     {
-        TextBuffer buffer = manPageView.Buffer;
-        string text = buffer.Text;
-        string[] lines = text.Split('\n');
-
-        for (int lineIndex = 0; lineIndex < lines.Length; lineIndex++)
+        // Create adapter and tag lookup
+        var tagLookup = new Dictionary<string, TextTag>
         {
-            string line = lines[lineIndex];
-            if (string.IsNullOrWhiteSpace(line))
-                continue;
+            [ManPageFormatter.HeaderTag] = headerTag,
+            [ManPageFormatter.OptionTag] = optionTag,
+            [ManPageFormatter.FilePathTag] = filePathTag,
+            [ManPageFormatter.UrlTag] = urlTag
+        };
 
-            // Calculate line offset
-            int lineStart = 0;
-            for (int i = 0; i < lineIndex; i++)
-                lineStart += lines[i].Length + 1; // +1 for newline
+        var adapter = new GtkTextBufferAdapter(manPageView.Buffer, tagLookup);
 
-            // Section headers (all caps, standalone lines)
-            if (lineIndex > 0 && lineIndex < lines.Length - 1 &&
-                line == line.ToUpper() && line.Length > 0 &&
-                !line.StartsWith("    ") && !line.StartsWith("\t"))
-            {
-                TextIter start = buffer.GetIterAtOffset(lineStart);
-                TextIter end = buffer.GetIterAtOffset(lineStart + line.Length);
-                buffer.ApplyTag(headerTag, start, end);
-                continue;
-            }
-
-            // Options and commands indented with spaces
-            if (line.StartsWith("    ") && line.Trim().Length > 0)
-            {
-                // Check for option patterns like "+ key", "- key", "Enter", etc.
-                var optionMatch = System.Text.RegularExpressions.Regex.Match(line, @"^\s+([+\-]|Enter|Return|Letters)\s+(key|-)\s");
-                if (optionMatch.Success)
-                {
-                    int matchStart = lineStart + optionMatch.Index;
-                    int matchEnd = matchStart + optionMatch.Length;
-                    TextIter start = buffer.GetIterAtOffset(matchStart);
-                    TextIter end = buffer.GetIterAtOffset(matchEnd);
-                    buffer.ApplyTag(optionTag, start, end);
-                    continue;
-                }
-            }
-
-            // File paths
-            if (line.Contains("~/.config/gman") || line.Contains("/home/"))
-            {
-                var pathMatches = System.Text.RegularExpressions.Regex.Matches(line, @"(/[^\s]+|~/[^\s]+)");
-                foreach (System.Text.RegularExpressions.Match match in pathMatches)
-                {
-                    int matchStart = lineStart + match.Index;
-                    int matchEnd = matchStart + match.Length;
-                    TextIter start = buffer.GetIterAtOffset(matchStart);
-                    TextIter end = buffer.GetIterAtOffset(matchEnd);
-                    buffer.ApplyTag(filePathTag, start, end);
-                }
-            }
-
-            // URLs
-            if (line.Contains("http://") || line.Contains("https://"))
-            {
-                var urlMatches = System.Text.RegularExpressions.Regex.Matches(line, @"https?://[^\s]+");
-                foreach (System.Text.RegularExpressions.Match match in urlMatches)
-                {
-                    int matchStart = lineStart + match.Index;
-                    int matchEnd = matchStart + match.Length;
-                    TextIter start = buffer.GetIterAtOffset(matchStart);
-                    TextIter end = buffer.GetIterAtOffset(matchEnd);
-                    buffer.ApplyTag(urlTag, start, end);
-                }
-            }
-        }
+        // Use formatter to apply tags
+        formatter.FormatHelpText(adapter);
     }
 
     private void OnSettingsClicked(object? sender, EventArgs e)
@@ -2071,5 +1860,32 @@ public class MainWindow
 
         string devPath = System.IO.Path.Combine(baseDir, "..", "..", "..", "ui", "main_window.ui");
         return System.IO.Path.GetFullPath(devPath);
+    }
+
+    /// <summary>
+    /// Adapter to bridge GTK's TextBuffer to ManPageFormatter's ITextBuffer interface
+    /// </summary>
+    private class GtkTextBufferAdapter : ITextBuffer
+    {
+        private readonly TextBuffer buffer;
+        private readonly Dictionary<string, TextTag> tagLookup;
+
+        public GtkTextBufferAdapter(TextBuffer buffer, Dictionary<string, TextTag> tagLookup)
+        {
+            this.buffer = buffer;
+            this.tagLookup = tagLookup;
+        }
+
+        public string Text => buffer.Text;
+
+        public void ApplyTag(string tagName, int startOffset, int endOffset)
+        {
+            if (tagLookup.TryGetValue(tagName, out var tag))
+            {
+                TextIter start = buffer.GetIterAtOffset(startOffset);
+                TextIter end = buffer.GetIterAtOffset(endOffset);
+                buffer.ApplyTag(tag, start, end);
+            }
+        }
     }
 }
