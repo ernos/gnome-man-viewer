@@ -6,6 +6,17 @@ All notable changes to GMan will be documented in this file.
 
 ### Added
 
+* **Note-taking for individual man pages**: Added a collapsible notes panel for taking notes on each man page:
+  + Notes panel appears to the right of the man page view
+  + Toggle visibility with checkbox in panel header or press 'n' key
+  + Notes automatically saved to `~/.config/gman/notes/program-name.txt`
+  + Notes persist between application sessions
+  + Auto-save when typing or switching between man pages
+  + Notes are program-specific - each man page has its own notes file
+  + Notes panel visibility preference saved in settings
+  + Monospace font for consistent formatting
+  + **Visual indicator**: Programs with notes show a document icon (📄) in the program list
+
 * **Favorites list with persistent storage**: Added a dedicated favorites list with full persistence and visual indicators:
   + Separate favorites list displayed in the left pane alongside the main program list
   + Press '+' key while in the All Programs list to add the selected program to favorites
