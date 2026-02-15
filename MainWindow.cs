@@ -12,20 +12,26 @@ public class MainWindow
     private readonly Window mainWindow;
     private readonly Entry searchEntry;
     private readonly TextView manPageView;
+    private readonly TextView notesView;
     private readonly Label statusLabel;
     private readonly TreeView programListView;
     private readonly TreeView favoritesListView;
     private readonly CheckButton showFavoritesCheck;
     private readonly CheckButton showProgramsCheck;
+    private readonly CheckButton showNotesCheck;
     private readonly Paned leftPaned;
+    private readonly Paned rightPaned;
     private readonly Box favoritesBox;
     private readonly Box programsBox;
+    private readonly Box notesBox;
     private readonly ScrolledWindow favoritesListScroll;
     private readonly ScrolledWindow programListScroll;
     private readonly Label favoritesLabel;
     private readonly Label programListLabel;
+    private readonly Label notesLabel;
     private readonly EventBox favoritesLabelEventBox;
     private readonly EventBox programListLabelEventBox;
+    private readonly EventBox notesLabelEventBox;
     private readonly Button aboutButton;
     private readonly Button settingsButton;
     private readonly Button helpButton;
@@ -36,6 +42,7 @@ public class MainWindow
     private List<string> favorites = new();
     private Settings settings;
     private const string FAVORITE_ICON = "starred";
+    private const string NOTES_ICON = "text-x-generic";
     private TextTag highlightTag;
     private TextTag currentMatchTag;
     private TextTag headerTag;
@@ -69,6 +76,7 @@ public class MainWindow
         programListView = (TreeView)builder.GetObject("programListView");
         favoritesListView = (TreeView)builder.GetObject("favoritesListView");
         manPageView = (TextView)builder.GetObject("manPageView");
+        notesView = (TextView)builder.GetObject("notesView");
         statusLabel = (Label)builder.GetObject("statusLabel");
         aboutButton = (Button)builder.GetObject("aboutButton");
         settingsButton = (Button)builder.GetObject("settingsButton");
@@ -77,22 +85,28 @@ public class MainWindow
         previousButton = (Button)builder.GetObject("previousButton");
         showFavoritesCheck = (CheckButton)builder.GetObject("showFavoritesCheck");
         showProgramsCheck = (CheckButton)builder.GetObject("showProgramsCheck");
+        showNotesCheck = (CheckButton)builder.GetObject("showNotesCheck");
         leftPaned = (Paned)builder.GetObject("leftPaned");
+        rightPaned = (Paned)builder.GetObject("rightPaned");
         favoritesBox = (Box)builder.GetObject("favoritesBox");
         programsBox = (Box)builder.GetObject("programsBox");
+        notesBox = (Box)builder.GetObject("notesBox");
         favoritesListScroll = (ScrolledWindow)builder.GetObject("favoritesListScroll");
         programListScroll = (ScrolledWindow)builder.GetObject("programListScroll");
         favoritesLabel = (Label)builder.GetObject("favoritesLabel");
         programListLabel = (Label)builder.GetObject("programListLabel");
+        notesLabel = (Label)builder.GetObject("notesLabel");
         favoritesLabelEventBox = (EventBox)builder.GetObject("favoritesLabelEventBox");
         programListLabelEventBox = (EventBox)builder.GetObject("programListLabelEventBox");
+        notesLabelEventBox = (EventBox)builder.GetObject("notesLabelEventBox");
 
         if (mainWindow == null || searchEntry == null || programListView == null || favoritesListView == null ||
-            manPageView == null || statusLabel == null || aboutButton == null || settingsButton == null ||
+            manPageView == null || notesView == null || statusLabel == null || aboutButton == null || settingsButton == null ||
             helpButton == null || nextButton == null || previousButton == null || showFavoritesCheck == null ||
-            showProgramsCheck == null || leftPaned == null || favoritesBox == null || programsBox == null ||
+            showProgramsCheck == null || showNotesCheck == null || leftPaned == null || rightPaned == null ||
+            favoritesBox == null || programsBox == null || notesBox == null ||
             favoritesListScroll == null || programListScroll == null || favoritesLabel == null || programListLabel == null ||
-            favoritesLabelEventBox == null || programListLabelEventBox == null)
+            notesLabel == null || favoritesLabelEventBox == null || programListLabelEventBox == null || notesLabelEventBox == null)
         {
             throw new InvalidOperationException("Failed to load UI from main_window.ui");
         }
@@ -133,10 +147,12 @@ public class MainWindow
         previousButton.Clicked += OnPreviousClicked;
         showFavoritesCheck.Toggled += OnShowFavoritesToggled;
         showProgramsCheck.Toggled += OnShowProgramsToggled;
+        showNotesCheck.Toggled += OnShowNotesToggled;
 
         // Make labels clickable to toggle checkboxes
         favoritesLabelEventBox.ButtonPressEvent += OnFavoritesLabelClicked;
         programListLabelEventBox.ButtonPressEvent += OnProgramListLabelClicked;
+        notesLabelEventBox.ButtonPressEvent += OnNotesLabelClicked;
 
         // Setup favorites list (single column: text only)
         favoritesStore = new ListStore(typeof(string));
@@ -161,26 +177,34 @@ public class MainWindow
             favoritesListView.Selection.Changed += OnFavoritesSelectionChanged;
         }
 
-        // Setup programs list (two columns: icon + text)
-        programStore = new ListStore(typeof(string), typeof(string));
+        // Setup programs list (three columns: favorite icon + notes icon + text)
+        programStore = new ListStore(typeof(string), typeof(string), typeof(string));
         programListView.Model = programStore;
         programListView.HeadersVisible = false;
         programListView.HasTooltip = true;
         programListView.QueryTooltip += OnProgramListQueryTooltip;
 
-        // Column 0: Icon
-        var iconColumn = new TreeViewColumn();
-        var iconRenderer = new CellRendererPixbuf();
-        iconRenderer.StockSize = (uint)IconSize.Menu;
-        iconColumn.PackStart(iconRenderer, false);
-        iconColumn.AddAttribute(iconRenderer, "icon-name", 0);
-        programListView.AppendColumn(iconColumn);
+        // Column 0: Favorite Icon
+        var favoriteIconColumn = new TreeViewColumn();
+        var favoriteIconRenderer = new CellRendererPixbuf();
+        favoriteIconRenderer.StockSize = (uint)IconSize.Menu;
+        favoriteIconColumn.PackStart(favoriteIconRenderer, false);
+        favoriteIconColumn.AddAttribute(favoriteIconRenderer, "icon-name", 0);
+        programListView.AppendColumn(favoriteIconColumn);
 
-        // Column 1: Text
+        // Column 1: Notes Icon
+        var notesIconColumn = new TreeViewColumn();
+        var notesIconRenderer = new CellRendererPixbuf();
+        notesIconRenderer.StockSize = (uint)IconSize.Menu;
+        notesIconColumn.PackStart(notesIconRenderer, false);
+        notesIconColumn.AddAttribute(notesIconRenderer, "icon-name", 1);
+        programListView.AppendColumn(notesIconColumn);
+
+        // Column 2: Text
         var column = new TreeViewColumn();
         var cellRenderer = new CellRendererText();
         column.PackStart(cellRenderer, true);
-        column.AddAttribute(cellRenderer, "text", 1);
+        column.AddAttribute(cellRenderer, "text", 2);
         programListView.AppendColumn(column);
         programListView.RowActivated += OnProgramSelected;
         programListView.KeyPressEvent += OnProgramListKeyPress;
@@ -196,6 +220,16 @@ public class MainWindow
         manPageView.Editable = false;
         manPageView.WrapMode = WrapMode.Word;
         manPageView.ButtonPressEvent += OnManPageViewClicked;
+
+        // Set monospace font for man page display
+        var cssProvider = new CssProvider();
+        cssProvider.LoadFromData("textview { font-family: monospace; font-size: 10pt; }");
+        manPageView.StyleContext.AddProvider(cssProvider, StyleProviderPriority.Application);
+
+        // Setup notes view
+        notesView.WrapMode = WrapMode.Word;
+        notesView.StyleContext.AddProvider(cssProvider, StyleProviderPriority.Application);
+        notesView.Buffer.Changed += OnNotesChanged;
 
         // Create highlight tag for search matches
         highlightTag = new TextTag("highlight");
@@ -251,6 +285,13 @@ public class MainWindow
         manPageView.Buffer.TagTable.Add(manReferenceTag);
 
         LoadPrograms();
+
+        // Set initial notes visibility from settings
+        showNotesCheck.Active = settings.ShowNotes;
+        UpdateNotesVisibility();
+
+        // Add window key press handler for global shortcuts (e.g., 'n' for notes)
+        mainWindow.KeyPressEvent += OnWindowKeyPress;
 
         // Handle CLI arguments
         if (!string.IsNullOrEmpty(autoLoadProgram))
@@ -481,9 +522,12 @@ public class MainWindow
 
         foreach (var program in filtered)
         {
-            // Column 0: icon (show star if favorited), Column 1: program name
-            string icon = favorites.Contains(program, StringComparer.OrdinalIgnoreCase) ? FAVORITE_ICON : "";
-            programStore.AppendValues(icon, program);
+            // Column 0: favorite icon (show star if favorited)
+            string favoriteIcon = favorites.Contains(program, StringComparer.OrdinalIgnoreCase) ? FAVORITE_ICON : "";
+            // Column 1: notes icon (show document if has notes)
+            string notesIcon = HasNotes(program) ? NOTES_ICON : "";
+            // Column 2: program name
+            programStore.AppendValues(favoriteIcon, notesIcon, program);
         }
 
         // Reattach model after populating
@@ -554,7 +598,7 @@ public class MainWindow
         string pathStr = args.Path.ToString();
         if (programStore.GetIterFromString(out var iter, pathStr))
         {
-            var program = programStore.GetValue(iter, 1)?.ToString(); // Column 1 is text
+            var program = programStore.GetValue(iter, 2)?.ToString(); // Column 2 is text
             if (!string.IsNullOrEmpty(program))
             {
                 LoadManPage(program);
@@ -576,7 +620,7 @@ public class MainWindow
         // This handler is only attached when single-click mode is enabled
         if (settings.UseSingleClick && programListView.Selection.GetSelected(out TreeIter iter))
         {
-            var program = programStore.GetValue(iter, 1)?.ToString(); // Column 1 is text
+            var program = programStore.GetValue(iter, 2)?.ToString(); // Column 2 is text
             if (!string.IsNullOrEmpty(program) && !string.Equals(program, currentLoadedProgram, StringComparison.OrdinalIgnoreCase))
             {
                 LoadManPage(program);
@@ -588,10 +632,19 @@ public class MainWindow
     {
         try
         {
+            // Save current notes before switching pages
+            if (isManPageLoaded && currentLoadedProgram != null && currentLoadedProgram != pageName)
+            {
+                SaveNotes(currentLoadedProgram);
+            }
+
             statusLabel.Text = $"Loading man page for '{pageName}'...";
 
+            // Calculate the appropriate width for formatting the man page
+            int manWidth = CalculateTextViewCharacterWidth();
+
             // Try to get man page content
-            string manContent = GetManPageContent(pageName);
+            string manContent = GetManPageContent(pageName, manWidth);
 
             if (string.IsNullOrEmpty(manContent))
             {
@@ -628,6 +681,7 @@ public class MainWindow
                     statusLabel.Text = $"Displaying help for: {pageName}";
                     isManPageLoaded = true;
                     currentLoadedProgram = pageName;
+                    LoadNotes(pageName);
                 }
             }
             else
@@ -638,6 +692,7 @@ public class MainWindow
                 statusLabel.Text = $"Displaying: {pageName}";
                 isManPageLoaded = true;
                 currentLoadedProgram = pageName;
+                LoadNotes(pageName);
             }
 
             // Clear search state when loading a new page
@@ -664,7 +719,7 @@ public class MainWindow
         }
     }
 
-    private string GetManPageContent(string pageName)
+    private string GetManPageContent(string pageName, int width = 80)
     {
         try
         {
@@ -675,6 +730,9 @@ public class MainWindow
             process.StartInfo.RedirectStandardOutput = true;
             process.StartInfo.RedirectStandardError = true;
             process.StartInfo.CreateNoWindow = true;
+
+            // Set MANWIDTH environment variable to format for the correct width
+            process.StartInfo.Environment["MANWIDTH"] = width.ToString();
 
             process.Start();
             string output = process.StandardOutput.ReadToEnd();
@@ -688,6 +746,50 @@ public class MainWindow
         catch (Exception)
         {
             return string.Empty;
+        }
+    }
+
+    private int CalculateTextViewCharacterWidth()
+    {
+        try
+        {
+            // Get the allocated width of the TextView
+            int widthInPixels = manPageView.AllocatedWidth;
+
+            // Account for scrollbar and padding (approximate)
+            widthInPixels -= 20;
+
+            if (widthInPixels <= 0)
+            {
+                return 80; // Default fallback
+            }
+
+            // Get the monospace font description that's set on the TextView
+            var fontDesc = Pango.FontDescription.FromString("Monospace 10");
+
+            // Create a Pango layout to measure character width
+            var layout = manPageView.CreatePangoLayout("M");
+            layout.FontDescription = fontDesc;
+            layout.GetPixelSize(out int charWidth, out _);
+
+            if (charWidth <= 0)
+            {
+                return 80; // Default fallback
+            }
+
+            // Calculate how many characters fit in the width
+            int characterWidth = widthInPixels / charWidth;
+            Console.WriteLine($"DEBUG: TextView width in pixels: {widthInPixels}, character width in pixels: {charWidth}, calculated character width: {characterWidth}");
+
+            // Ensure reasonable bounds (minimum 40, maximum 200)
+            characterWidth = Math.Max(40, Math.Min(200, characterWidth));
+
+            return characterWidth;
+        }
+        catch (Exception)
+        {
+            // If anything goes wrong, return a safe default
+            return 80;
         }
     }
 
@@ -977,7 +1079,7 @@ public class MainWindow
 
             if (programListView.Selection.GetSelected(out TreeIter selectedIter))
             {
-                var program = programStore.GetValue(selectedIter, 1)?.ToString(); // Column 1 is text
+                var program = programStore.GetValue(selectedIter, 2)?.ToString(); // Column 2 is text
                 if (!string.IsNullOrEmpty(program))
                 {
                     LoadManPage(program);
@@ -992,7 +1094,7 @@ public class MainWindow
         {
             if (programListView.Selection.GetSelected(out TreeIter selectedIter))
             {
-                var program = programStore.GetValue(selectedIter, 1)?.ToString();
+                var program = programStore.GetValue(selectedIter, 2)?.ToString();
                 if (!string.IsNullOrEmpty(program))
                 {
                     AddToFavorites(program);
@@ -1067,7 +1169,7 @@ public class MainWindow
         {
             do
             {
-                var value = programStore.GetValue(iter, 1)?.ToString(); // Column 1 is text
+                var value = programStore.GetValue(iter, 2)?.ToString(); // Column 2 is text
                 if (value != null && value.ToLower().StartsWith(typeAheadBuffer))
                 {
                     // Found a match - select and scroll
@@ -1288,6 +1390,141 @@ public class MainWindow
         args.RetVal = true;
     }
 
+    private void OnNotesLabelClicked(object? sender, ButtonPressEventArgs args)
+    {
+        Console.WriteLine("DEBUG: Notes label clicked");
+        showNotesCheck.Active = !showNotesCheck.Active;
+        args.RetVal = true;
+    }
+
+    private void OnShowNotesToggled(object? sender, EventArgs e)
+    {
+        UpdateNotesVisibility();
+
+        // Save the notes visibility preference
+        settings.ShowNotes = showNotesCheck.Active;
+        settings.Save();
+    }
+
+    private void UpdateNotesVisibility()
+    {
+        if (showNotesCheck.Active)
+        {
+            // Show notes panel
+            notesBox.Visible = true;
+            rightPaned.Position = rightPaned.AllocatedWidth - 300; // Give notes 300px by default
+        }
+        else
+        {
+            // Hide notes panel
+            notesBox.Visible = false;
+            rightPaned.Position = rightPaned.AllocatedWidth; // Give all space to man page
+        }
+    }
+
+    private void OnNotesChanged(object? sender, EventArgs e)
+    {
+        // Auto-save notes when they change
+        if (isManPageLoaded && currentLoadedProgram != null)
+        {
+            SaveNotes(currentLoadedProgram);
+        }
+    }
+
+    private void OnWindowKeyPress(object? sender, KeyPressEventArgs args)
+    {
+        // Check for 'n' key to toggle notes
+        if (args.Event.Key == Gdk.Key.n || args.Event.Key == Gdk.Key.N)
+        {
+            // Only toggle if no text entry has focus
+            if (mainWindow.Focus != searchEntry && mainWindow.Focus != notesView)
+            {
+                showNotesCheck.Active = !showNotesCheck.Active;
+                args.RetVal = true;
+            }
+        }
+    }
+
+    private void LoadNotes(string programName)
+    {
+        try
+        {
+            var notesPath = GetNotesPath(programName);
+
+            if (File.Exists(notesPath))
+            {
+                var content = File.ReadAllText(notesPath);
+                notesView.Buffer.Text = content;
+            }
+            else
+            {
+                notesView.Buffer.Text = "";
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error loading notes: {ex.Message}");
+            notesView.Buffer.Text = "";
+        }
+    }
+
+    private void SaveNotes(string programName)
+    {
+        try
+        {
+            var notesPath = GetNotesPath(programName);
+            var notesDir = Path.GetDirectoryName(notesPath);
+            var content = notesView.Buffer.Text;
+
+            // Check if notes file existed before
+            bool hadNotesBefore = File.Exists(notesPath);
+
+            // Only save if content is not empty
+            if (!string.IsNullOrWhiteSpace(content))
+            {
+                // Create directory if it doesn't exist
+                if (!string.IsNullOrEmpty(notesDir) && !Directory.Exists(notesDir))
+                {
+                    Directory.CreateDirectory(notesDir);
+                }
+
+                File.WriteAllText(notesPath, content);
+
+                // If this is the first time notes are being saved, refresh the program list to show the icon
+                if (!hadNotesBefore)
+                {
+                    RefreshProgramList("");
+                }
+            }
+            else if (hadNotesBefore)
+            {
+                // If content is empty but file exists, delete the file
+                File.Delete(notesPath);
+                RefreshProgramList(""); // Refresh to remove the icon
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error saving notes: {ex.Message}");
+        }
+    }
+
+    private string GetNotesPath(string programName)
+    {
+        var notesDir = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            ".config",
+            "gman",
+            "notes"
+        );
+        return Path.Combine(notesDir, $"{programName}.txt");
+    }
+
+    private bool HasNotes(string programName)
+    {
+        return File.Exists(GetNotesPath(programName));
+    }
+
     private void OnProgramListFocusIn(object? sender, FocusInEventArgs args)
     {
         if (programListView.Selection.GetSelected(out _))
@@ -1428,7 +1665,7 @@ public class MainWindow
         bool foundInList = false;
         programStore.Foreach((model, path, iter) =>
         {
-            var value = programStore.GetValue(iter, 1)?.ToString(); // Column 1 is text
+            var value = programStore.GetValue(iter, 2)?.ToString(); // Column 2 is text
             if (string.Equals(value, programName, StringComparison.OrdinalIgnoreCase))
             {
                 programListView.Selection.SelectPath(path);
@@ -1451,13 +1688,19 @@ public class MainWindow
 
     private void OnDeleteEvent(object? sender, DeleteEventArgs args)
     {
+        // Save notes before quitting
+        if (isManPageLoaded && currentLoadedProgram != null)
+        {
+            SaveNotes(currentLoadedProgram);
+        }
+
         Application.Quit();
         args.RetVal = true;
     }
 
     private void OnAboutClicked(object? sender, EventArgs e)
     {
-        string version = Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "0.1.0";
+        string version = Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "1.0";
 
         using var about = new AboutDialog
         {

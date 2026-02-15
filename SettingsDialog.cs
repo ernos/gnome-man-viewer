@@ -125,6 +125,7 @@ public class Settings
     public bool UseSingleClick { get; set; } = false;       // Default: double-click
     public List<string> Favorites { get; set; } = new();    // Default: empty list
     public bool FavoritesAtTop { get; set; } = true;        // Default: favorites at top
+    public bool ShowNotes { get; set; } = false;            // Default: notes hidden
 
     public static Settings Load()
     {
@@ -164,6 +165,9 @@ public class Settings
                             case "FavoritesAtTop":
                                 settings.FavoritesAtTop = value.ToLower() == "true";
                                 break;
+                            case "ShowNotes":
+                                settings.ShowNotes = value.ToLower() == "true";
+                                break;
                         }
                     }
                 }
@@ -188,7 +192,8 @@ public class Settings
             var content = $"EnableHelpFallback={EnableHelpFallback}\n" +
                          $"UseSingleClick={UseSingleClick}\n" +
                          $"Favorites={favoritesString}\n" +
-                         $"FavoritesAtTop={FavoritesAtTop}\n";
+                         $"FavoritesAtTop={FavoritesAtTop}\n" +
+                         $"ShowNotes={ShowNotes}\n";
 
             File.WriteAllText(SettingsPath, content);
         }
