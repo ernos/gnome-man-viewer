@@ -48,10 +48,13 @@ public class MainWindow
     private Settings settings;
     private readonly ManPageFormatter formatter = new();
     private readonly NotesRepository notesRepository = new();
+<<<<<<< HEAD
     private readonly ProgramDiscoveryService programDiscovery = new();
     private FavoritesManager favoritesManager = null!; // Initialized after settings loaded
     private readonly SearchManager searchManager = new();
     private readonly ManPageLoader manPageLoader = new();
+=======
+>>>>>>> 6438486 (# Ractoring into code with better coding conventions -  Phase 1 Complete! ✅)
     private const string FAVORITE_ICON = "starred";
     private const string NOTES_ICON = "text-x-generic";
     private const string WARNING_ICON = "dialog-warning";
@@ -70,6 +73,12 @@ public class MainWindow
     private bool isManPageLoaded = false;
     private string? currentLoadedProgram;
     private Dictionary<(int start, int end), string> manPageReferences = new();
+<<<<<<< HEAD
+=======
+    private string? lastSearchTerm;
+    private List<(TextIter start, TextIter end)> searchMatches = new();
+    private int currentMatchIndex = -1;
+>>>>>>> 6438486 (# Ractoring into code with better coding conventions -  Phase 1 Complete! ✅)
     private readonly TypeAheadNavigator typeAheadNavigator = new();
     private uint? typeAheadTimeoutId = null;
     private string cachedStatusMessage = "";

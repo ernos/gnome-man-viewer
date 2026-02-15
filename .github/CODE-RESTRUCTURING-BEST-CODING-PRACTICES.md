@@ -382,12 +382,22 @@ public class FavoritesManager {
 - ❌ Extract GTK widgets into their own classes (they're already encapsulated)
 - ❌ Use inheritance for code reuse (prefer composition)
 
+<<<<<<< HEAD
 ### 📋 Refactoring Plan of orcer and phases
 
 Phase 1: ~~Extract Pure Logic (2-4 days)~~
 ├── 1. ~~ManPageFormatter (+ unit tests)~~
 ├── 2. ~~TypeAheadNavigator (+ unit tests)~~
 └── 3. ~~NotesRepository (+ unit tests)~~
+=======
+### 📋 Recommended Refactoring Order
+
+```
+Phase 1: Extract Pure Logic (2-4 days)
+├── 1. ManPageFormatter (+ unit tests)
+├── 2. TypeAheadNavigator (+ unit tests)
+└── 3. NotesRepository (+ unit tests)
+>>>>>>> 6438486 (# Ractoring into code with better coding conventions -  Phase 1 Complete! ✅)
 
 Phase 2: Extract Services (3-5 days)
 ├── 4. ProgramDiscoveryService (+ unit tests)
@@ -401,7 +411,11 @@ Phase 3: Clean Up MainWindow (2-3 days)
 
 Phase 4: (Optional) Advanced Patterns (5-7 days)
 └── 10. Consider MVP if further testability needed
+<<<<<<< HEAD
 
+=======
+```
+>>>>>>> 6438486 (# Ractoring into code with better coding conventions -  Phase 1 Complete! ✅)
 
 ### 📊 Cost-Benefit Analysis
 
