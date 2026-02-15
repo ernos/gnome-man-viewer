@@ -308,7 +308,7 @@
                             <child>
                               <object class="GtkLabel" id="manNotesLabel">
                                 <property name="can-focus">False</property>
-                                <property name="label">Show Notes</property>
+                                <property name="label">Click here to open Notes</property>
                               </object>
                               <packing>
                                 <property name="expand">False</property>

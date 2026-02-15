@@ -6,13 +6,14 @@ namespace GMan;
 
 public class SettingsDialog
 {
-    public static (ResponseType response, bool enableHelpFallback, bool useSingleClick, bool favoritesAtTop) ShowDialog(Window parent)
+    public static (ResponseType response, bool enableHelpFallback, bool useSingleClick, bool favoritesAtTop, bool autoCopySelection) ShowDialog(Window parent)
     {
         // Load current settings
         var settings = Settings.Load();
         bool enableHelpFallback = settings.EnableHelpFallback;
         bool useSingleClick = settings.UseSingleClick;
         bool favoritesAtTop = settings.FavoritesAtTop;
+        bool autoCopySelection = settings.AutoCopySelection;
 
         using var dialog = new Dialog("Settings", parent, DialogFlags.Modal | DialogFlags.DestroyWithParent);
         dialog.SetDefaultSize(400, 300);
@@ -82,6 +83,14 @@ public class SettingsDialog
 
         contentArea.PackStart(favoritesBox, false, false, 5);
 
+        // Separator
+        contentArea.PackStart(new Separator(Orientation.Horizontal), false, false, 5);
+
+        // Auto-copy selection option
+        var autoCopyCheck = new CheckButton("Automatically copy selected text in man page to clipboard");
+        autoCopyCheck.Active = autoCopySelection;
+        contentArea.PackStart(autoCopyCheck, false, false, 5);
+
         // Add buttons
         dialog.AddButton("Cancel", ResponseType.Cancel);
         dialog.AddButton("Save", ResponseType.Ok);
@@ -95,6 +104,7 @@ public class SettingsDialog
             enableHelpFallback = enableHelpFallbackCheck.Active;
             useSingleClick = singleClickRadio.Active;
             favoritesAtTop = favoritesTopRadio.Active;
+            autoCopySelection = autoCopyCheck.Active;
 
             // Save settings
             var saveSettings = new Settings
@@ -102,13 +112,14 @@ public class SettingsDialog
                 EnableHelpFallback = enableHelpFallback,
                 UseSingleClick = useSingleClick,
                 Favorites = settings.Favorites, // Preserve existing favorites
-                FavoritesAtTop = favoritesAtTop
+                FavoritesAtTop = favoritesAtTop,
+                AutoCopySelection = autoCopySelection
             };
             saveSettings.Save();
         }
 
         dialog.Hide();
-        return (response, enableHelpFallback, useSingleClick, favoritesAtTop);
+        return (response, enableHelpFallback, useSingleClick, favoritesAtTop, autoCopySelection);
     }
 }
 
@@ -126,6 +137,7 @@ public class Settings
     public List<string> Favorites { get; set; } = new();    // Default: empty list
     public bool FavoritesAtTop { get; set; } = true;        // Default: favorites at top
     public bool ShowNotes { get; set; } = false;            // Default: notes hidden
+    public bool AutoCopySelection { get; set; } = false;    // Default: auto-copy disabled
 
     public static Settings Load()
     {
@@ -168,6 +180,9 @@ public class Settings
                             case "ShowNotes":
                                 settings.ShowNotes = value.ToLower() == "true";
                                 break;
+                            case "AutoCopySelection":
+                                settings.AutoCopySelection = value.ToLower() == "true";
+                                break;
                         }
                     }
                 }
@@ -193,7 +208,8 @@ public class Settings
                          $"UseSingleClick={UseSingleClick}\n" +
                          $"Favorites={favoritesString}\n" +
                          $"FavoritesAtTop={FavoritesAtTop}\n" +
-                         $"ShowNotes={ShowNotes}\n";
+                         $"ShowNotes={ShowNotes}\n" +
+                         $"AutoCopySelection={AutoCopySelection}\n";
 
             File.WriteAllText(SettingsPath, content);
         }
