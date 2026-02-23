@@ -50,4 +50,9 @@ Thumbs.db
 .history
 COMMIT_MSG.txt
 doc/README-DEV.md
-.github/copilot-instructions.md
+
+# VS Code settings (personal configuration)
+.vscode/
+
+# GitHub workflows and configs (personal)
+.github/
