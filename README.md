@@ -65,7 +65,7 @@ A graphical man page viewer for Linux/X11 environments, written in C# using GTK#
 
 ## Changelog and release information
 
-### **Version 1.0** - Major Release
+### **Version 2.0** - Major Release
 
 **Search Overhaul**
 * Added Previous and Next buttons for match navigation

@@ -2,6 +2,37 @@
 
 All notable changes to GMan will be documented in this file.
 
+## [Unreleased]
+
+### Added
+
+* **Centralized version management**: Implemented build number tracking system:
+  + Single source of truth for version in gman.csproj
+  + Version format: Major.Minor.Build (e.g., 2.0.1)
+  + Properties: VersionPrefix, BuildNumber, Version (computed), AssemblyVersion, FileVersion
+  + About dialog automatically displays full version from assembly metadata
+  + Created tools/bump-version.sh script for automated version increments
+  + Added version release workflow documentation in doc/README-DEV.md
+  + Version consistency across gman.csproj, help.txt, and About dialog
+
+* **System-wide installation feature**: Added installation button in settings dialog:
+  + "Install GMan System-Wide..." button in settings
+  + Choose between user-local installation (recommended, no sudo) or system-wide installation (requires sudo)
+  + User-local installation:
+    - Installs to ~/.local/bin/gman
+    - Desktop entry in ~/.local/share/applications
+    - Icon in ~/.local/share/icons
+    - Only available to your user account
+  + System-wide installation:
+    - Installs to /usr/bin/gman (requires PolicyKit/pkexec)
+    - Desktop entry in /usr/share/applications
+    - Icon in /usr/share/icons
+    - Available to all users on the system
+  + Works on GNOME, KDE, XFCE, and other Linux desktops
+  + Graphical password prompt for system-wide installation (via PolicyKit)
+  + Automatic icon cache and desktop database updates
+  + Clear success/error messages and user cancellation support
+
 ## [1.1] - 2026-02-15
 
 ### Added
