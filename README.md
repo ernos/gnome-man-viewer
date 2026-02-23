@@ -1,6 +1,6 @@
 # GMan - GTK# Man Page Viewer
 
-A graphical man page viewer for Linux/X11 environments, written in C# using GTK#. Features favorites list, smart filtering, advanced search, keyboard navigation, clickable man references, and command-line integration.
+A graphical man page viewer for Linux/X11 environments, written in C# using GTK#. Features favorites list, smart filtering, advanced search, keyboard navigation, clickable man references, nicely colored and formatted text in the manuals and command-line integration.
 
 ## Features
 
@@ -65,7 +65,7 @@ A graphical man page viewer for Linux/X11 environments, written in C# using GTK#
 
 ## Changelog and release information
 
-### **Version 1.0** - Major Release
+### **Version 2.0** - Major Release
 
 **Search Overhaul**
 * Added Previous and Next buttons for match navigation
@@ -187,7 +187,7 @@ Create file `gman.desktop` :
 
 ```
 [Desktop Entry]
-Version=1.0
+Version=1.1
 Type=Application
 Name=GMan
 Comment=GTK# Man Page Viewer

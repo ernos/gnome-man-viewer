@@ -24,11 +24,14 @@ public class MainWindow
     private readonly Box favoritesBox;
     private readonly Box programsBox;
     private readonly Box notesBox;
+    private readonly Box notesContainerBox;
     private readonly ScrolledWindow favoritesListScroll;
     private readonly ScrolledWindow programListScroll;
+    private readonly ScrolledWindow notesScroll;
     private readonly Label favoritesLabel;
     private readonly Label programListLabel;
     private readonly Label notesLabel;
+    private readonly Label manLabel;
     private readonly EventBox favoritesLabelEventBox;
     private readonly EventBox programListLabelEventBox;
     private readonly EventBox notesLabelEventBox;
@@ -37,12 +40,21 @@ public class MainWindow
     private readonly Button helpButton;
     private readonly Button nextButton;
     private readonly Button previousButton;
+    private readonly Button addToFavoritesButton;
+    private readonly CheckButton manNotesCheck;
+    private readonly Box manNotesCheckBox;
     private readonly ListStore programStore;
     private readonly ListStore favoritesStore;
-    private List<string> favorites = new();
     private Settings settings;
+    private readonly ManPageFormatter formatter = new();
+    private readonly NotesRepository notesRepository = new();
+    private readonly ProgramDiscoveryService programDiscovery = new();
+    private FavoritesManager favoritesManager = null!; // Initialized after settings loaded
+    private readonly SearchManager searchManager = new();
+    private readonly ManPageLoader manPageLoader = new();
     private const string FAVORITE_ICON = "starred";
     private const string NOTES_ICON = "text-x-generic";
+    private const string WARNING_ICON = "dialog-warning";
     private TextTag highlightTag;
     private TextTag currentMatchTag;
     private TextTag headerTag;
@@ -54,16 +66,14 @@ public class MainWindow
     private TextTag urlTag;
     private TextTag manReferenceTag;
     private List<string> allPrograms = new();
+    private List<string> executablePrograms = new();
     private bool isManPageLoaded = false;
     private string? currentLoadedProgram;
     private Dictionary<(int start, int end), string> manPageReferences = new();
-    private string? lastSearchTerm;
     private List<(TextIter start, TextIter end)> searchMatches = new();
-    private int currentMatchIndex = -1;
-    private string typeAheadBuffer = "";
+    private readonly TypeAheadNavigator typeAheadNavigator = new();
     private uint? typeAheadTimeoutId = null;
     private string cachedStatusMessage = "";
-    private bool isInTypeAhead = false;
     private int lastPanedPosition = 200; // Store the last user-set paned position
 
     public MainWindow(string? autoLoadProgram = null, string? autoSearchTerm = null)
@@ -83,6 +93,9 @@ public class MainWindow
         helpButton = (Button)builder.GetObject("helpButton");
         nextButton = (Button)builder.GetObject("nextButton");
         previousButton = (Button)builder.GetObject("previousButton");
+        addToFavoritesButton = (Button)builder.GetObject("addToFavoritesButton");
+        manNotesCheck = (CheckButton)builder.GetObject("manNotesCheck");
+        manNotesCheckBox = (Box)builder.GetObject("manNotesCheckBox");
         showFavoritesCheck = (CheckButton)builder.GetObject("showFavoritesCheck");
         showProgramsCheck = (CheckButton)builder.GetObject("showProgramsCheck");
         showNotesCheck = (CheckButton)builder.GetObject("showNotesCheck");
@@ -91,22 +104,27 @@ public class MainWindow
         favoritesBox = (Box)builder.GetObject("favoritesBox");
         programsBox = (Box)builder.GetObject("programsBox");
         notesBox = (Box)builder.GetObject("notesBox");
+        notesContainerBox = (Box)builder.GetObject("notesContainerBox");
         favoritesListScroll = (ScrolledWindow)builder.GetObject("favoritesListScroll");
         programListScroll = (ScrolledWindow)builder.GetObject("programListScroll");
+        notesScroll = (ScrolledWindow)builder.GetObject("notesScroll");
         favoritesLabel = (Label)builder.GetObject("favoritesLabel");
         programListLabel = (Label)builder.GetObject("programListLabel");
         notesLabel = (Label)builder.GetObject("notesLabel");
+        manLabel = (Label)builder.GetObject("manLabel");
         favoritesLabelEventBox = (EventBox)builder.GetObject("favoritesLabelEventBox");
         programListLabelEventBox = (EventBox)builder.GetObject("programListLabelEventBox");
         notesLabelEventBox = (EventBox)builder.GetObject("notesLabelEventBox");
 
         if (mainWindow == null || searchEntry == null || programListView == null || favoritesListView == null ||
             manPageView == null || notesView == null || statusLabel == null || aboutButton == null || settingsButton == null ||
-            helpButton == null || nextButton == null || previousButton == null || showFavoritesCheck == null ||
+            helpButton == null || nextButton == null || previousButton == null || addToFavoritesButton == null ||
+            manNotesCheck == null || manNotesCheckBox == null || showFavoritesCheck == null ||
             showProgramsCheck == null || showNotesCheck == null || leftPaned == null || rightPaned == null ||
-            favoritesBox == null || programsBox == null || notesBox == null ||
-            favoritesListScroll == null || programListScroll == null || favoritesLabel == null || programListLabel == null ||
-            notesLabel == null || favoritesLabelEventBox == null || programListLabelEventBox == null || notesLabelEventBox == null)
+            favoritesBox == null || programsBox == null || notesBox == null || notesContainerBox == null ||
+            favoritesListScroll == null || programListScroll == null || notesScroll == null ||
+            favoritesLabel == null || programListLabel == null ||
+            notesLabel == null || manLabel == null || favoritesLabelEventBox == null || programListLabelEventBox == null || notesLabelEventBox == null)
         {
             throw new InvalidOperationException("Failed to load UI from main_window.ui");
         }
@@ -134,8 +152,10 @@ public class MainWindow
         // Load settings
         settings = Settings.Load();
 
-        // Load favorites from settings
-        favorites = new List<string>(settings.Favorites);
+        // Initialize services that depend on settings
+        favoritesManager = new FavoritesManager(settings);
+        // Initialize services that depend on settings
+        favoritesManager = new FavoritesManager(settings);
 
         mainWindow.DeleteEvent += OnDeleteEvent;
         searchEntry.Changed += OnSearchTextChanged;
@@ -145,6 +165,8 @@ public class MainWindow
         helpButton.Clicked += OnHelpClicked;
         nextButton.Clicked += OnNextClicked;
         previousButton.Clicked += OnPreviousClicked;
+        addToFavoritesButton.Clicked += OnAddToFavoritesClicked;
+        manNotesCheck.Toggled += OnManNotesCheckToggled;
         showFavoritesCheck.Toggled += OnShowFavoritesToggled;
         showProgramsCheck.Toggled += OnShowProgramsToggled;
         showNotesCheck.Toggled += OnShowNotesToggled;
@@ -221,6 +243,9 @@ public class MainWindow
         manPageView.WrapMode = WrapMode.Word;
         manPageView.ButtonPressEvent += OnManPageViewClicked;
 
+        // Wire up button release handler for auto-copy feature (copy when user finishes selecting)
+        manPageView.ButtonReleaseEvent += OnManPageViewButtonRelease;
+
         // Set monospace font for man page display
         var cssProvider = new CssProvider();
         cssProvider.LoadFromData("textview { font-family: monospace; font-size: 10pt; }");
@@ -230,6 +255,9 @@ public class MainWindow
         notesView.WrapMode = WrapMode.Word;
         notesView.StyleContext.AddProvider(cssProvider, StyleProviderPriority.Application);
         notesView.Buffer.Changed += OnNotesChanged;
+
+        // Wire up notes repository event to refresh program list when notes status changes
+        notesRepository.NotesStatusChanged += (sender, programName) => RefreshProgramList("");
 
         // Create highlight tag for search matches
         highlightTag = new TextTag("highlight");
@@ -243,52 +271,57 @@ public class MainWindow
         currentMatchTag.Foreground = "black";
         manPageView.Buffer.TagTable.Add(currentMatchTag);
 
-        // Create formatting tags for man pages
-        headerTag = new TextTag("header");
-        headerTag.Foreground = "#2E86AB";  // Blue
+        // Create formatting tags for man pages using ManPageFormatter styles
+        var tagStyles = ManPageFormatter.GetDefaultTagStyles();
+
+        headerTag = new TextTag(ManPageFormatter.HeaderTag);
+        headerTag.Foreground = tagStyles[ManPageFormatter.HeaderTag].Foreground;
         headerTag.Weight = Pango.Weight.Bold;
-        headerTag.Scale = 1.3;
+        headerTag.Scale = tagStyles[ManPageFormatter.HeaderTag].Scale;
         manPageView.Buffer.TagTable.Add(headerTag);
 
-        commandTag = new TextTag("command");
-        commandTag.Foreground = "#A23B72";  // Purple
+        commandTag = new TextTag(ManPageFormatter.CommandTag);
+        commandTag.Foreground = tagStyles[ManPageFormatter.CommandTag].Foreground;
         commandTag.Weight = Pango.Weight.Bold;
         manPageView.Buffer.TagTable.Add(commandTag);
 
-        optionTag = new TextTag("option");
-        optionTag.Foreground = "#F18F01";  // Orange
+        optionTag = new TextTag(ManPageFormatter.OptionTag);
+        optionTag.Foreground = tagStyles[ManPageFormatter.OptionTag].Foreground;
         optionTag.Weight = Pango.Weight.Bold;
         manPageView.Buffer.TagTable.Add(optionTag);
 
-        argumentTag = new TextTag("argument");
-        argumentTag.Foreground = "#C73E1D";  // Red
+        argumentTag = new TextTag(ManPageFormatter.ArgumentTag);
+        argumentTag.Foreground = tagStyles[ManPageFormatter.ArgumentTag].Foreground;
         argumentTag.Style = Pango.Style.Italic;
         manPageView.Buffer.TagTable.Add(argumentTag);
 
-        boldTag = new TextTag("bold");
+        boldTag = new TextTag(ManPageFormatter.BoldTag);
         boldTag.Weight = Pango.Weight.Bold;
         manPageView.Buffer.TagTable.Add(boldTag);
 
-        filePathTag = new TextTag("filePath");
-        filePathTag.Foreground = "#06A77D";  // Teal/Green
+        filePathTag = new TextTag(ManPageFormatter.FilePathTag);
+        filePathTag.Foreground = tagStyles[ManPageFormatter.FilePathTag].Foreground;
         filePathTag.Underline = Pango.Underline.Single;
         manPageView.Buffer.TagTable.Add(filePathTag);
 
-        urlTag = new TextTag("url");
-        urlTag.Foreground = "#0077CC";  // Blue
+        urlTag = new TextTag(ManPageFormatter.UrlTag);
+        urlTag.Foreground = tagStyles[ManPageFormatter.UrlTag].Foreground;
         urlTag.Underline = Pango.Underline.Single;
         manPageView.Buffer.TagTable.Add(urlTag);
 
-        manReferenceTag = new TextTag("manReference");
-        manReferenceTag.Foreground = "#0077CC";  // Blue
+        manReferenceTag = new TextTag(ManPageFormatter.ManReferenceTag);
+        manReferenceTag.Foreground = tagStyles[ManPageFormatter.ManReferenceTag].Foreground;
         manReferenceTag.Underline = Pango.Underline.Single;
         manPageView.Buffer.TagTable.Add(manReferenceTag);
 
         LoadPrograms();
 
-        // Set initial notes visibility from settings
+        // Set initial notes visibility from settings (defer until window is shown)
         showNotesCheck.Active = settings.ShowNotes;
-        UpdateNotesVisibility();
+        mainWindow.Shown += (sender, args) =>
+        {
+            UpdateNotesVisibility();
+        };
 
         // Add window key press handler for global shortcuts (e.g., 'n' for notes)
         mainWindow.KeyPressEvent += OnWindowKeyPress;
@@ -330,65 +363,29 @@ public class MainWindow
 
     private void LoadPrograms()
     {
-        //TODO Make this configurable in settin
-        var paths = new[] { "/bin", "/usr/bin", "/usr/local/bin", "/sbin", "/usr/sbin" };
-        var programs = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
+        // Discover programs, filtering by man pages if help fallback is disabled
+        allPrograms = programDiscovery.DiscoverPrograms(filterByManPages: !settings.EnableHelpFallback);
+        executablePrograms = programDiscovery.GetExecutablePrograms();
 
-        foreach (var path in paths)
-        {
-            if (Directory.Exists(path))
-            {
-                try
-                {
-                    var files = Directory.GetFiles(path);
-                    foreach (var file in files)
-                    {
-                        programs.Add(System.IO.Path.GetFileName(file));
-                    }
-                }
-                catch { }
-            }
-        }
-
-        // If EnableHelpFallback is false, only show programs with man pages
-        if (!settings.EnableHelpFallback)
-        {
-            var manPages = GetManPageNames();
-            if (manPages.Count > 0)
-            {
-                // Intersect: only programs that exist in both sets
-                var programsWithManPages = programs.Where(p => manPages.Contains(p)).ToList();
-                allPrograms = programsWithManPages;
-                CleanupFavorites();
-                RefreshProgramList("");
-                RefreshFavoritesList();
-                ApplyFavoritesPosition();
-                statusLabel.Text = $"Ready - {allPrograms.Count} programs with man pages available";
-                return;
-            }
-            // If man -k fails, fall through to show all programs
-        }
-
-        allPrograms = programs.ToList();
-        CleanupFavorites();
         RefreshProgramList("");
         RefreshFavoritesList();
         ApplyFavoritesPosition();
-        statusLabel.Text = $"Ready - {allPrograms.Count} programs available";
+
+        if (!settings.EnableHelpFallback)
+        {
+            statusLabel.Text = $"Ready - {allPrograms.Count} programs with man pages available";
+        }
+        else
+        {
+            statusLabel.Text = $"Ready - {allPrograms.Count} programs available";
+        }
     }
 
     private void CleanupFavorites()
     {
-        // Remove favorites that no longer exist in allPrograms
-        int initialCount = favorites.Count;
-        favorites = favorites.Where(f => allPrograms.Contains(f, StringComparer.OrdinalIgnoreCase)).ToList();
-
-        if (favorites.Count < initialCount)
-        {
-            SaveFavorites();
-            int removedCount = initialCount - favorites.Count;
-            Console.WriteLine($"Removed {removedCount} unavailable program(s) from favorites");
-        }
+        // Keep all favorites - don't filter out subcommands or programs not in scan
+        // Favorites can include man pages not discoverable through directory scan
+        // (e.g., subcommands like "nvme-device-smart-scan")
     }
 
     private void ApplyFavoritesPosition()
@@ -410,79 +407,6 @@ public class MainWindow
                 leftPaned.Pack2(favoritesBox, true, true);
             }
         }
-    }
-
-    private HashSet<string> GetManPageNames()
-    {
-        var manPages = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-        try
-        {
-            var process = new System.Diagnostics.Process
-            {
-                StartInfo = new System.Diagnostics.ProcessStartInfo
-                {
-                    FileName = "man",
-                    Arguments = "-k .",
-                    UseShellExecute = false,
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    CreateNoWindow = true
-                }
-            };
-
-            Console.WriteLine("Starting man -k . query...");
-            process.Start();
-
-            // Read output with timeout
-            var outputTask = System.Threading.Tasks.Task.Run(() => process.StandardOutput.ReadToEnd());
-
-            // Wait up to 5 seconds for man -k to complete
-            if (!outputTask.Wait(5000))
-            {
-                Console.WriteLine("man -k . timed out after 5 seconds");
-                try { process.Kill(); } catch { }
-                return manPages; // Return empty set on timeout
-            }
-
-            string output = outputTask.Result;
-
-            if (!process.HasExited)
-            {
-                try { process.Kill(); } catch { }
-            }
-            else if (process.ExitCode != 0)
-            {
-                Console.WriteLine($"man -k . failed with exit code {process.ExitCode}");
-                return manPages; // Return empty set on failure
-            }
-
-            Console.WriteLine($"man -k . returned {output.Split('\n').Length} lines");
-
-            // Parse output: "program_name (section) - description"
-            // Extract everything before the first space and opening parenthesis
-            foreach (var line in output.Split('\n'))
-            {
-                if (string.IsNullOrWhiteSpace(line))
-                    continue;
-
-                var match = System.Text.RegularExpressions.Regex.Match(line, @"^([^\s(]+)\s*\(");
-                if (match.Success)
-                {
-                    manPages.Add(match.Groups[1].Value);
-                }
-            }
-
-            Console.WriteLine($"Parsed {manPages.Count} unique man page names");
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"Error in GetManPageNames: {ex.Message}");
-            // If man -k fails, return empty set (caller will use all programs)
-            return manPages;
-        }
-
-        return manPages;
     }
 
     private void OnSearchTextChanged(object? sender, EventArgs e)
@@ -522,12 +446,24 @@ public class MainWindow
 
         foreach (var program in filtered)
         {
-            // Column 0: favorite icon (show star if favorited)
-            string favoriteIcon = favorites.Contains(program, StringComparer.OrdinalIgnoreCase) ? FAVORITE_ICON : "";
-            // Column 1: notes icon (show document if has notes)
-            string notesIcon = HasNotes(program) ? NOTES_ICON : "";
-            // Column 2: program name
-            programStore.AppendValues(favoriteIcon, notesIcon, program);
+            // Column 0: favsorite icon (show star if favorited)
+            string favoriteIcon = favoritesManager.IsFavorite(program) ? FAVORITE_ICON : "";
+
+            if (executablePrograms.Contains(program))
+            {
+                // If program is executable display a warning icon in the notes column to indicate 
+                // that it is executable and might be a security risk since it calls the program with '--help'
+                programStore.AppendValues(favoriteIcon, WARNING_ICON, program);
+            }
+            else
+            {
+                // Column 1: notes icon (show document if has notes)
+                string notesIcon = HasNotes(program) ? NOTES_ICON : "";
+
+                // Column 2: program name
+                programStore.AppendValues(favoriteIcon, notesIcon, program);
+            }
+
         }
 
         // Reattach model after populating
@@ -547,10 +483,8 @@ public class MainWindow
 
         favoritesStore.Clear();
 
-        // Only show favorites that exist in allPrograms
-        var validFavorites = favorites.Where(f => allPrograms.Contains(f, StringComparer.OrdinalIgnoreCase)).ToList();
-
-        foreach (var favorite in validFavorites)
+        // Show all favorites (including subcommands not in program list), sorted alphabetically
+        foreach (var favorite in favoritesManager.GetSorted())
         {
             favoritesStore.AppendValues(favorite);
         }
@@ -559,18 +493,10 @@ public class MainWindow
         favoritesListView.Model = favoritesStore;
     }
 
-    private void SaveFavorites()
-    {
-        settings.Favorites = new List<string>(favorites);
-        settings.Save();
-    }
-
     private void AddToFavorites(string program)
     {
-        if (!favorites.Contains(program, StringComparer.OrdinalIgnoreCase))
+        if (favoritesManager.Add(program))
         {
-            favorites.Add(program);
-            SaveFavorites();
             RefreshFavoritesList();
             RefreshProgramList(""); // Refresh to show star icon
             statusLabel.Text = $"Added '{program}' to favorites";
@@ -578,19 +504,18 @@ public class MainWindow
         else
         {
             statusLabel.Text = $"'{program}' is already in favorites";
-        }
+            }
     }
 
     private void RemoveFromFavorites(string program)
     {
-        var removed = favorites.RemoveAll(f => string.Equals(f, program, StringComparison.OrdinalIgnoreCase)) > 0;
-        if (removed)
-        {
-            SaveFavorites();
-            RefreshFavoritesList();
-            RefreshProgramList(""); // Refresh to remove star icon
-            statusLabel.Text = $"Removed '{program}' from favorites";
-        }
+        if (favoritesManager.Remove(program))
+            if (favoritesManager.Remove(program))
+            {
+                RefreshFavoritesList();
+                RefreshProgramList(""); // Refresh to remove star icon
+                statusLabel.Text = $"Removed '{program}' from favorites";
+            }
     }
 
     private void OnProgramSelected(object? sender, RowActivatedArgs args)
@@ -608,10 +533,10 @@ public class MainWindow
 
     private void OnProgramSelectionChanged(object? sender, EventArgs e)
     {
-        Console.WriteLine($"DEBUG: OnProgramSelectionChanged fired, isInTypeAhead={isInTypeAhead}");
+        Console.WriteLine($"DEBUG: OnProgramSelectionChanged fired, isInTypeAhead={typeAheadNavigator.IsActive}");
 
         // Don't load man page if we're just navigating with type-ahead
-        if (isInTypeAhead)
+        if (typeAheadNavigator.IsActive)
         {
             Console.WriteLine("DEBUG: Skipping LoadManPage because we're in type-ahead mode");
             return;
@@ -643,63 +568,55 @@ public class MainWindow
             // Calculate the appropriate width for formatting the man page
             int manWidth = CalculateTextViewCharacterWidth();
 
-            // Try to get man page content
-            string manContent = GetManPageContent(pageName, manWidth);
+            // Load content using the service
+            var result = manPageLoader.LoadContent(pageName, manWidth, settings.EnableHelpFallback);
 
-            if (string.IsNullOrEmpty(manContent))
+            if (!result.Success)
             {
-                // Man page not found, check if we should try --help
-                if (!settings.EnableHelpFallback)
-                {
-                    // Help fallback disabled
-                    statusLabel.Text = $"Error: No manual entry for '{pageName}'";
-                    manPageView.Buffer.Text = $"No manual entry for {pageName}";
-                    isManPageLoaded = false;
-                    currentLoadedProgram = null;
-                    return;
-                }
+                // No content available
+                string message = settings.EnableHelpFallback
+                    ? $"Error: No manual entry for '{pageName}' and no help available"
+                    : $"Error: No manual entry for '{pageName}'";
 
-                // Try --help
-                string helpContent = GetHelpContent(pageName);
-
-                if (string.IsNullOrEmpty(helpContent))
-                {
-                    // No help available either
-                    statusLabel.Text = $"Error: No manual entry for '{pageName}' and no help available";
-                    manPageView.Buffer.Text = $"No manual entry for {pageName}";
-                    isManPageLoaded = false;
-                    currentLoadedProgram = null;
-                }
-                else
-                {
-                    // Show help with warning banner
-                    string warningBanner = $"⚠️  WARNING: No man page found for '{pageName}'\n" +
-                                          "Showing output from 'program --help' instead.\n" +
-                                          "────────────────────────────────────────────\n\n";
-                    manPageView.Buffer.Text = warningBanner + helpContent;
-                    FormatManPage(pageName);
-                    statusLabel.Text = $"Displaying help for: {pageName}";
-                    isManPageLoaded = true;
-                    currentLoadedProgram = pageName;
-                    LoadNotes(pageName);
-                }
+                statusLabel.Text = message;
+                manPageView.Buffer.Text = $"No manual entry for {pageName}";
+                isManPageLoaded = false;
+                currentLoadedProgram = null;
+                addToFavoritesButton.Sensitive = false;
             }
-            else
+            else if (result.Source == ManPageLoader.ContentSource.HelpFallback)
+            {
+                // Show help with warning banner
+                string warningBanner = $"⚠️  WARNING: No man page found for '{pageName}'\n" +
+                                      "Showing output from 'program --help' instead.\n" +
+                                      "────────────────────────────────────────────\n\n";
+                manPageView.Buffer.Text = warningBanner + result.Content;
+                FormatManPage(pageName);
+                manLabel.Text = $"Help for {pageName}";
+                mainWindow.Title = $"GMan - {pageName} --help";
+                statusLabel.Text = $"Displaying help for: {pageName}";
+                isManPageLoaded = true;
+                currentLoadedProgram = pageName;
+                addToFavoritesButton.Sensitive = true;
+                LoadNotes(pageName);
+            }
+            else  // ManPage source
             {
                 // Man page found
-                manPageView.Buffer.Text = manContent;
+                manPageView.Buffer.Text = result.Content;
                 FormatManPage(pageName);
+                UpdateManPageHeader(result.Content, pageName);
                 statusLabel.Text = $"Displaying: {pageName}";
                 isManPageLoaded = true;
                 currentLoadedProgram = pageName;
+                addToFavoritesButton.Sensitive = true;
                 LoadNotes(pageName);
             }
 
             // Clear search state when loading a new page
             searchEntry.Text = "";
-            lastSearchTerm = null;
-            searchMatches.Clear();
-            currentMatchIndex = -1;
+            searchManager.Clear();
+            searchManager.Clear();
             nextButton.Sensitive = false;
             previousButton.Sensitive = false;
 
@@ -716,38 +633,11 @@ public class MainWindow
             manPageView.Buffer.Text = $"Error loading man page: {ex.Message}";
             isManPageLoaded = false;
             currentLoadedProgram = null;
+            addToFavoritesButton.Sensitive = false;
         }
     }
 
-    private string GetManPageContent(string pageName, int width = 80)
-    {
-        try
-        {
-            var process = new System.Diagnostics.Process();
-            process.StartInfo.FileName = "man";
-            process.StartInfo.Arguments = pageName;
-            process.StartInfo.UseShellExecute = false;
-            process.StartInfo.RedirectStandardOutput = true;
-            process.StartInfo.RedirectStandardError = true;
-            process.StartInfo.CreateNoWindow = true;
 
-            // Set MANWIDTH environment variable to format for the correct width
-            process.StartInfo.Environment["MANWIDTH"] = width.ToString();
-
-            process.Start();
-            string output = process.StandardOutput.ReadToEnd();
-            process.WaitForExit();
-
-            // Remove control characters that could cause beeps or other unwanted behavior
-            output = System.Text.RegularExpressions.Regex.Replace(output, @"[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]", "");
-
-            return output;
-        }
-        catch (Exception)
-        {
-            return string.Empty;
-        }
-    }
 
     private int CalculateTextViewCharacterWidth()
     {
@@ -793,206 +683,59 @@ public class MainWindow
         }
     }
 
+    private void UpdateManPageHeader(string manContent, string pageName)
+    {
+        // Extract first line for label
+        string firstLine = manContent.Split('\n').FirstOrDefault()?.Trim() ?? "Manual Page";
+        if (!string.IsNullOrEmpty(firstLine))
+        {
+            manLabel.Text = firstLine;
+        }
+        else
+        {
+            manLabel.Text = "Manual Page";
+        }
+
+        // Update window title
+        mainWindow.Title = $"GMan - {pageName.ToUpper()} Manual";
+    }
+
     private void FormatManPage(string programName)
     {
-        TextBuffer buffer = manPageView.Buffer;
-        string text = buffer.Text;
-        string[] lines = text.Split('\n');
-
         // Clear man page references
         manPageReferences.Clear();
 
-        int lineStart = 0;
-        bool inSeeAlsoSection = false;
-
-        foreach (string line in lines)
+        // Create adapter and tag lookup
+        var tagLookup = new Dictionary<string, TextTag>
         {
-            int lineLength = line.Length;
-            TextIter start = buffer.GetIterAtOffset(lineStart);
-            TextIter end = buffer.GetIterAtOffset(lineStart + lineLength);
+            [ManPageFormatter.HeaderTag] = headerTag,
+            [ManPageFormatter.CommandTag] = commandTag,
+            [ManPageFormatter.OptionTag] = optionTag,
+            [ManPageFormatter.ArgumentTag] = argumentTag,
+            [ManPageFormatter.BoldTag] = boldTag,
+            [ManPageFormatter.FilePathTag] = filePathTag,
+            [ManPageFormatter.UrlTag] = urlTag,
+            [ManPageFormatter.ManReferenceTag] = manReferenceTag
+        };
 
-            // Format section headers (all caps words at start of line)
-            if (System.Text.RegularExpressions.Regex.IsMatch(line, @"^[A-Z][A-Z\s]+$") && line.Trim().Length > 0)
-            {
-                buffer.ApplyTag(headerTag, start, end);
+        var adapter = new GtkTextBufferAdapter(manPageView.Buffer, tagLookup);
 
-                // Check if we're entering the SEE ALSO section
-                string trimmedLine = line.Trim();
-                if (trimmedLine == "SEE ALSO")
-                {
-                    inSeeAlsoSection = true;
-                }
-                else
-                {
-                    inSeeAlsoSection = false;
-                }
-            }
-            // Format command names (program name in various contexts)
-            // Skip lines that look like man page headers/footers: COMMAND(8)...COMMAND(8)
-            else if (line.Contains(programName) && !System.Text.RegularExpressions.Regex.IsMatch(line, @"^\S+\(\d+\).*\S+\(\d+\)\s*$"))
-            {
-                int index = 0;
-                while ((index = line.IndexOf(programName, index)) != -1)
-                {
-                    // Check if this is a whole word match (word boundaries before and after)
-                    bool isWordBoundaryBefore = index == 0 || char.IsWhiteSpace(line[index - 1]) || char.IsPunctuation(line[index - 1]);
-                    bool isWordBoundaryAfter = (index + programName.Length >= line.Length) ||
-                    char.IsWhiteSpace(line[index + programName.Length]) ||
-                    char.IsPunctuation(line[index + programName.Length]);
+        // Use formatter to apply tags
+        var result = formatter.FormatManPage(adapter, programName);
 
-                    if (isWordBoundaryBefore && isWordBoundaryAfter)
-                    {
-                        TextIter cmdStart = buffer.GetIterAtOffset(lineStart + index);
-                        TextIter cmdEnd = buffer.GetIterAtOffset(lineStart + index + programName.Length);
-                        buffer.ApplyTag(commandTag, cmdStart, cmdEnd);
-                    }
-                    index += programName.Length;
-                }
-            }
-
-            // Format options and arguments using regex
-            // Match options: -x, -?, -x=value, --option, --option=value, -arj, -box, etc.
-            // Can be inside brackets [] or braces {}, separated by pipes |
-            // Values can contain brackets/braces/pipes for syntax (e.g., --opt=[val1|val2])
-            var optionMatches = System.Text.RegularExpressions.Regex.Matches(line,
-            @"(?<=^|\s|\[|\{|\||,)(-[-a-zA-Z0-9?]+(?:=\[[^\]]+\]|=[^\s,\[\]]+)?|--[a-zA-Z][-a-zA-Z0-9\u2010]*(?:=\[[^\]]+\]|=[^\s,\[\]]+|\[[^\]]+\])?)(?=[\s,\[\]\{\}\|]|$)");
-            // ...existing code...
-            foreach (System.Text.RegularExpressions.Match match in optionMatches)
-            {
-                TextIter optStart = buffer.GetIterAtOffset(lineStart + match.Index);
-                TextIter optEnd = buffer.GetIterAtOffset(lineStart + match.Index + match.Length);
-                buffer.ApplyTag(optionTag, optStart, optEnd);
-            }
-
-            // Format argument placeholders
-            // Match: <WORD>, UPPERCASE_WORDS, single lowercase letter before comma, 
-            // lowercase_with_underscores_or-dashes, lowercase words after dash options with special chars
-            var argMatches = System.Text.RegularExpressions.Regex.Matches(line,
-            @"<[A-Z_][A-Z_0-9]*>|(?<![a-zA-Z])[A-Z][A-Z_0-9]+(?![a-zA-Z])|(?<=^|\s)[a-z](?=,\s)|(?<=^|\s)[a-z][a-z0-9]*[_\-][a-z0-9_\-:<>\[\]]*|(?<=-[a-zA-Z0-9?]+\s)[a-z][a-z0-9\-:<>\[\]]*");
-            foreach (System.Text.RegularExpressions.Match match in argMatches)
-            {
-                TextIter argStart = buffer.GetIterAtOffset(lineStart + match.Index);
-                TextIter argEnd = buffer.GetIterAtOffset(lineStart + match.Index + match.Length);
-                buffer.ApplyTag(argumentTag, argStart, argEnd);
-            }
-
-            // Format URLs (http:// or https://)
-            var urlMatches = System.Text.RegularExpressions.Regex.Matches(line, @"https?://[^\s<>\[\]]+");
-            foreach (System.Text.RegularExpressions.Match match in urlMatches)
-            {
-                TextIter urlStart = buffer.GetIterAtOffset(lineStart + match.Index);
-                TextIter urlEnd = buffer.GetIterAtOffset(lineStart + match.Index + match.Length);
-                buffer.ApplyTag(urlTag, urlStart, urlEnd);
-            }
-
-            // Format file paths (starting with / or ~/)
-            var filePathMatches = System.Text.RegularExpressions.Regex.Matches(line, @"(?:^|\s)(~?/[/\w\-\.]+)");
-            foreach (System.Text.RegularExpressions.Match match in filePathMatches)
-            {
-                // Use Group 1 to skip the leading whitespace
-                if (match.Groups.Count > 1)
-                {
-                    var pathGroup = match.Groups[1];
-                    TextIter pathStart = buffer.GetIterAtOffset(lineStart + pathGroup.Index);
-                    TextIter pathEnd = buffer.GetIterAtOffset(lineStart + pathGroup.Index + pathGroup.Length);
-                    buffer.ApplyTag(filePathTag, pathStart, pathEnd);
-                }
-            }
-
-            // Format man page references in SEE ALSO section (e.g., program(1), command(8))
-            if (inSeeAlsoSection)
-            {
-                // Match pattern: word-characters followed by (number)
-                // This matches: aa-stack(8), apparmor(7), aa_change_profile(3), etc.
-                var manRefMatches = System.Text.RegularExpressions.Regex.Matches(line, @"([a-zA-Z0-9_\-\.]+)\(\d+\)");
-                foreach (System.Text.RegularExpressions.Match match in manRefMatches)
-                {
-                    // Extract just the program name (without the section number)
-                    string fullMatch = match.Value;  // e.g., "aa-stack(8)"
-                    string progName = match.Groups[1].Value;  // e.g., "aa-stack"
-
-                    int matchStart = lineStart + match.Index;
-                    int matchEnd = matchStart + match.Length;
-
-                    TextIter refStart = buffer.GetIterAtOffset(matchStart);
-                    TextIter refEnd = buffer.GetIterAtOffset(matchEnd);
-                    buffer.ApplyTag(manReferenceTag, refStart, refEnd);
-
-                    // Store the reference for click handling
-                    manPageReferences[(matchStart, matchEnd)] = progName;
-                }
-            }
-
-            lineStart += lineLength + 1; // +1 for newline character
-        }
+        // Store man page references for click handling
+        manPageReferences = result.ManPageReferences;
     }
 
-    private string GetHelpContent(string programName)
-    {
-        try
-        {
-            using var process = new System.Diagnostics.Process();
-            process.StartInfo.FileName = programName;
-            process.StartInfo.Arguments = "--help";
-            process.StartInfo.UseShellExecute = false;
-            process.StartInfo.RedirectStandardOutput = true;
-            process.StartInfo.RedirectStandardError = true;
-            process.StartInfo.RedirectStandardInput = true;  // Prevent waiting for input
-            process.StartInfo.CreateNoWindow = true;
 
-            process.Start();
-            process.StandardInput.Close();  // Close stdin immediately
-
-            // Use a task with timeout to prevent blocking
-            var outputTask = System.Threading.Tasks.Task.Run(() => process.StandardOutput.ReadToEnd());
-
-            // Wait for either output or timeout (3 seconds)
-            if (!outputTask.Wait(3000))
-            {
-                // Timeout - kill the process
-                try { process.Kill(); } catch { }
-                return string.Empty;
-            }
-
-            string output = outputTask.Result;
-
-            // Ensure process has exited
-            if (!process.HasExited)
-            {
-                try { process.Kill(); } catch { }
-            }
-
-            // Remove control characters that could cause beeps or other unwanted behavior
-            output = System.Text.RegularExpressions.Regex.Replace(output, @"[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]", "");
-
-            return output;
-        }
-        catch (Exception)
-        {
-            return string.Empty;
-        }
-    }
 
     private void SearchInManPage(string searchTerm)
     {
         ClearSearchHighlights();
-        lastSearchTerm = searchTerm;
-        searchMatches.Clear();
-        currentMatchIndex = -1;
-
         TextBuffer buffer = manPageView.Buffer;
-        string searchLower = searchTerm.ToLower();
+        string text = buffer.Text;
 
-        TextIter iter = buffer.StartIter;
-        TextIter endIter = buffer.EndIter;
-
-        while (iter.ForwardSearch(searchLower, 0, out TextIter matchStart, out TextIter matchEnd, endIter))
-        {
-            searchMatches.Add((matchStart, matchEnd));
-            iter = matchEnd;
-        }
-
-        int matchCount = searchMatches.Count;
+        int matchCount = searchManager.FindMatches(text, searchTerm);
 
         if (matchCount == 0)
         {
@@ -1002,57 +745,105 @@ public class MainWindow
         }
         else
         {
-            // Highlight all matches and navigate to first
-            foreach (var (start, end) in searchMatches)
+            // Highlight all matches
+            foreach (var (start, end) in searchManager.GetMatches())
             {
-                buffer.ApplyTag(highlightTag, start, end);
+                TextIter startIter = buffer.GetIterAtOffset(start);
+                TextIter endIter = buffer.GetIterAtOffset(end);
+                buffer.ApplyTag(highlightTag, startIter, endIter);
             }
-            NavigateToMatch(0);
+
+            // Highlight current match
+            HighlightCurrentMatch();
+
+
+            // Highlight current match
+            HighlightCurrentMatch();
+
             statusLabel.Text = $"Match 1 of {matchCount} for '{searchTerm}' in {currentLoadedProgram}";
             nextButton.Sensitive = true;
             previousButton.Sensitive = true;
         }
     }
+    private void HighlightCurrentMatch()
+    {
+        var currentMatch = searchManager.GetCurrentMatch();
+        if (currentMatch == null)
+            return;
+
+        var (start, end) = currentMatch.Value;
+        TextBuffer buffer = manPageView.Buffer;
+        TextIter startIter = buffer.GetIterAtOffset(start);
+        TextIter endIter = buffer.GetIterAtOffset(end);
+
+        buffer.ApplyTag(currentMatchTag, startIter, endIter);
+        manPageView.ScrollToIter(startIter, 0.1, false, 0, 0);
+
+        int currentIndex = searchManager.CurrentIndex;
+        int matchCount = searchManager.MatchCount;
+        string searchTerm = searchManager.SearchTerm;
+        statusLabel.Text = $"Match {currentIndex + 1} of {matchCount} for '{searchTerm}' in {currentLoadedProgram}";
+    }
 
     private void NavigateToMatch(int index)
     {
-        if (searchMatches.Count == 0 || index < 0 || index >= searchMatches.Count)
-            return;
-
-        // Remove currentMatchTag from previous match if any
-        if (currentMatchIndex >= 0 && currentMatchIndex < searchMatches.Count)
-        {
-            var (oldStart, oldEnd) = searchMatches[currentMatchIndex];
-            manPageView.Buffer.RemoveTag(currentMatchTag, oldStart, oldEnd);
-        }
-
-        currentMatchIndex = index;
-        var (start, end) = searchMatches[index];
-        manPageView.Buffer.ApplyTag(currentMatchTag, start, end);
-        manPageView.ScrollToIter(start, 0.1, false, 0, 0);
-
-        string searchTerm = lastSearchTerm ?? "";
-        statusLabel.Text = $"Match {index + 1} of {searchMatches.Count} for '{searchTerm}' in {currentLoadedProgram}";
+        // This method is no longer used - navigation is handled by SearchManager
+        // Kept for backward compatibility if needed
+        int currentIndex = searchManager.CurrentIndex;
+        int matchCount = searchManager.MatchCount;
+        string searchTerm = searchManager.SearchTerm;
+        statusLabel.Text = $"Match {currentIndex + 1} of {matchCount} for '{searchTerm}' in {currentLoadedProgram}";
     }
 
     private void OnNextClicked(object? sender, EventArgs e)
     {
-        if (searchMatches.Count == 0)
+        if (!searchManager.HasMatches)
             return;
 
-        int nextIndex = (currentMatchIndex + 1) % searchMatches.Count;
-        NavigateToMatch(nextIndex);
+        // Remove highlight from current match
+        ClearCurrentMatchHighlight();
+
+        // Navigate to next
+        searchManager.NavigateToNext();
+
+        // Highlight new current match
+        HighlightCurrentMatch();
     }
 
     private void OnPreviousClicked(object? sender, EventArgs e)
     {
-        if (searchMatches.Count == 0)
+        if (!searchManager.HasMatches)
             return;
 
-        int prevIndex = currentMatchIndex - 1;
-        if (prevIndex < 0)
-            prevIndex = searchMatches.Count - 1;
-        NavigateToMatch(prevIndex);
+        // Remove highlight from current match
+        ClearCurrentMatchHighlight();
+
+        // Navigate to previous
+        searchManager.NavigateToPrevious();
+
+        // Highlight new current match
+        HighlightCurrentMatch();
+    }
+
+    private void ClearCurrentMatchHighlight()
+    {
+        var currentMatch = searchManager.GetCurrentMatch();
+        if (currentMatch == null)
+            return;
+
+        var (start, end) = currentMatch.Value;
+        TextBuffer buffer = manPageView.Buffer;
+        TextIter startIter = buffer.GetIterAtOffset(start);
+        TextIter endIter = buffer.GetIterAtOffset(end);
+        buffer.RemoveTag(currentMatchTag, startIter, endIter);
+    }
+
+    private void OnAddToFavoritesClicked(object? sender, EventArgs e)
+    {
+        if (isManPageLoaded && currentLoadedProgram != null)
+        {
+            AddToFavorites(currentLoadedProgram);
+        }
     }
 
     [GLib.ConnectBefore]
@@ -1117,10 +908,7 @@ public class MainWindow
             return;
         }
 
-        Console.WriteLine($"DEBUG: Processing character. Buffer before: '{typeAheadBuffer}'");
-
-        // Set flag to prevent OnProgramSelectionChanged from loading man pages
-        isInTypeAhead = true;
+        Console.WriteLine($"DEBUG: Processing character. Buffer before: '{typeAheadNavigator.Buffer}'");
 
         // Cancel existing timeout if any
         if (typeAheadTimeoutId.HasValue)
@@ -1137,59 +925,70 @@ public class MainWindow
             typeAheadTimeoutId = null;
         }
 
-        // Append character to buffer (limit to 5 characters)
-        typeAheadBuffer += char.ToLower(typedChar);
-        if (typeAheadBuffer.Length > 5)
-        {
-            typeAheadBuffer = typeAheadBuffer.Substring(typeAheadBuffer.Length - 5);
-        }
+        // Append character to navigator
+        typeAheadNavigator.AppendChar(typedChar);
 
-        Console.WriteLine($"DEBUG: Buffer after append: '{typeAheadBuffer}'");
+        Console.WriteLine($"DEBUG: Buffer after append: '{typeAheadNavigator.Buffer}'");
 
         // Always show what user has typed so far
-        statusLabel.Text = $"Type-ahead: {typeAheadBuffer}";
+        statusLabel.Text = typeAheadNavigator.GetStatusMessage();
         Console.WriteLine($"DEBUG: Status label set to: '{statusLabel.Text}'");
 
         // IMPORTANT: Start new timeout IMMEDIATELY before any GTK operations
         // that might process the event loop and fire the old timeout
-        typeAheadTimeoutId = GLib.Timeout.Add(1000, () =>
+        typeAheadTimeoutId = GLib.Timeout.Add(3000, () =>
         {
             Console.WriteLine("DEBUG: Timeout fired, resetting buffer");
-            ResetTypeAheadBuffer();
+            // Show clear visual feedback that timeout expired
+            statusLabel.Markup = typeAheadNavigator.GetTimeoutMessage();
+            GLib.Timeout.Add(2000, () =>
+            {
+                ResetTypeAheadBuffer();
+                return false;
+            });
             return false; // Don't repeat
         });
         Console.WriteLine($"DEBUG: New timeout created: {typeAheadTimeoutId}");
 
         // Find the first program starting with the buffer in the displayed list
-        // Use manual iteration instead of Foreach to avoid GTK event processing
-        bool found = false;
+        // Collect items from TreeView
+        var items = new List<string>();
         TreeIter iter;
-
         if (programStore.GetIterFirst(out iter))
         {
             do
             {
                 var value = programStore.GetValue(iter, 2)?.ToString(); // Column 2 is text
-                if (value != null && value.ToLower().StartsWith(typeAheadBuffer))
-                {
-                    // Found a match - select and scroll
-                    TreePath path = programStore.GetPath(iter);
-                    programListView.Selection.SelectPath(path);
-                    // Use idle callback for scrolling to avoid immediate event processing
-                    GLib.Idle.Add(() =>
-                    {
-                        programListView.ScrollToCell(path, null, false, 0, 0);
-                        return false;
-                    });
-                    found = true;
-                    break;
-                }
+                items.Add(value ?? "");
             } while (programStore.IterNext(ref iter));
         }
 
-        if (found)
+        // Use navigator to find match
+        var matchIndex = typeAheadNavigator.FindMatch(items);
+        if (matchIndex.HasValue)
         {
-            args.RetVal = true;
+            // Navigate to the match
+            if (programStore.GetIterFirst(out iter))
+            {
+                int currentIndex = 0;
+                do
+                {
+                    if (currentIndex == matchIndex.Value)
+                    {
+                        TreePath path = programStore.GetPath(iter);
+                        programListView.Selection.SelectPath(path);
+                        // Use idle callback for scrolling to avoid immediate event processing
+                        GLib.Idle.Add(() =>
+                        {
+                            programListView.ScrollToCell(path, null, false, 0, 0);
+                            return false;
+                        });
+                        args.RetVal = true;
+                        break;
+                    }
+                    currentIndex++;
+                } while (programStore.IterNext(ref iter));
+            }
         }
     }
 
@@ -1235,8 +1034,6 @@ public class MainWindow
             return;
         }
 
-        isInTypeAhead = true;
-
         if (typeAheadTimeoutId.HasValue)
         {
             try
@@ -1247,47 +1044,59 @@ public class MainWindow
             typeAheadTimeoutId = null;
         }
 
-        typeAheadBuffer += char.ToLower(typedChar);
-        if (typeAheadBuffer.Length > 5)
-        {
-            typeAheadBuffer = typeAheadBuffer.Substring(typeAheadBuffer.Length - 5);
-        }
+        typeAheadNavigator.AppendChar(typedChar);
 
-        statusLabel.Text = $"Type-ahead: {typeAheadBuffer}";
+        statusLabel.Text = typeAheadNavigator.GetStatusMessage();
 
-        typeAheadTimeoutId = GLib.Timeout.Add(1000, () =>
+        typeAheadTimeoutId = GLib.Timeout.Add(5000, () =>
         {
-            ResetTypeAheadBuffer();
+            // Show clear visual feedback that timeout expired
+            statusLabel.Markup = typeAheadNavigator.GetTimeoutMessage();
+            GLib.Timeout.Add(2000, () =>
+            {
+                ResetTypeAheadBuffer();
+                return false;
+            });
             return false;
         });
 
-        // Find first favorite starting with buffer
-        bool found = false;
+        // Collect items from TreeView
+        var items = new List<string>();
         TreeIter iter;
-
         if (favoritesStore.GetIterFirst(out iter))
         {
             do
             {
                 var value = favoritesStore.GetValue(iter, 0)?.ToString();
-                if (value != null && value.ToLower().StartsWith(typeAheadBuffer))
-                {
-                    TreePath path = favoritesStore.GetPath(iter);
-                    favoritesListView.Selection.SelectPath(path);
-                    GLib.Idle.Add(() =>
-                    {
-                        favoritesListView.ScrollToCell(path, null, false, 0, 0);
-                        return false;
-                    });
-                    found = true;
-                    break;
-                }
+                items.Add(value ?? "");
             } while (favoritesStore.IterNext(ref iter));
         }
 
-        if (found)
+        // Use navigator to find match
+        var matchIndex = typeAheadNavigator.FindMatch(items);
+        if (matchIndex.HasValue)
         {
-            args.RetVal = true;
+            // Navigate to the match
+            if (favoritesStore.GetIterFirst(out iter))
+            {
+                int currentIndex = 0;
+                do
+                {
+                    if (currentIndex == matchIndex.Value)
+                    {
+                        TreePath path = favoritesStore.GetPath(iter);
+                        favoritesListView.Selection.SelectPath(path);
+                        GLib.Idle.Add(() =>
+                        {
+                            favoritesListView.ScrollToCell(path, null, false, 0, 0);
+                            return false;
+                        });
+                        args.RetVal = true;
+                        break;
+                    }
+                    currentIndex++;
+                } while (favoritesStore.IterNext(ref iter));
+            }
         }
     }
 
@@ -1307,7 +1116,7 @@ public class MainWindow
     private void OnFavoritesSelectionChanged(object? sender, EventArgs e)
     {
         // Don't load man page if we're just navigating with type-ahead
-        if (isInTypeAhead)
+        if (typeAheadNavigator.IsActive)
         {
             return;
         }
@@ -1410,16 +1219,52 @@ public class MainWindow
     {
         if (showNotesCheck.Active)
         {
-            // Show notes panel
+            // Show entire notes container
+            notesContainerBox.Visible = true;
             notesBox.Visible = true;
-            rightPaned.Position = rightPaned.AllocatedWidth - 300; // Give notes 300px by default
+            manNotesCheckBox.Visible = false;
+
+            // Sync the man page header checkbox
+            manNotesCheck.Toggled -= OnManNotesCheckToggled;
+            manNotesCheck.Active = true;
+            manNotesCheck.Toggled += OnManNotesCheckToggled;
+
+            // Use idle callback to ensure window is properly sized
+            GLib.Idle.Add(() =>
+            {
+                int availableWidth = rightPaned.AllocatedWidth;
+                if (availableWidth > 300)
+                {
+                    rightPaned.Position = availableWidth - 300;
+                }
+                return false;
+            });
         }
         else
         {
-            // Hide notes panel
-            notesBox.Visible = false;
-            rightPaned.Position = rightPaned.AllocatedWidth; // Give all space to man page
+            // Hide entire notes container and show checkbox in man page header
+            notesContainerBox.Visible = false;
+            manNotesCheckBox.Visible = true;
+
+            // Sync the man page header checkbox
+            manNotesCheck.Toggled -= OnManNotesCheckToggled;
+            manNotesCheck.Active = false;
+            manNotesCheck.Toggled += OnManNotesCheckToggled;
+
+            // Use idle callback to ensure window is properly sized
+            GLib.Idle.Add(() =>
+            {
+                // Give all space to man page
+                rightPaned.Position = rightPaned.AllocatedWidth;
+                return false;
+            });
         }
+    }
+
+    private void OnManNotesCheckToggled(object? sender, EventArgs e)
+    {
+        // Sync with the main notes checkbox
+        showNotesCheck.Active = manNotesCheck.Active;
     }
 
     private void OnNotesChanged(object? sender, EventArgs e)
@@ -1449,17 +1294,8 @@ public class MainWindow
     {
         try
         {
-            var notesPath = GetNotesPath(programName);
-
-            if (File.Exists(notesPath))
-            {
-                var content = File.ReadAllText(notesPath);
-                notesView.Buffer.Text = content;
-            }
-            else
-            {
-                notesView.Buffer.Text = "";
-            }
+            var content = notesRepository.Load(programName);
+            notesView.Buffer.Text = content;
         }
         catch (Exception ex)
         {
@@ -1472,36 +1308,8 @@ public class MainWindow
     {
         try
         {
-            var notesPath = GetNotesPath(programName);
-            var notesDir = Path.GetDirectoryName(notesPath);
             var content = notesView.Buffer.Text;
-
-            // Check if notes file existed before
-            bool hadNotesBefore = File.Exists(notesPath);
-
-            // Only save if content is not empty
-            if (!string.IsNullOrWhiteSpace(content))
-            {
-                // Create directory if it doesn't exist
-                if (!string.IsNullOrEmpty(notesDir) && !Directory.Exists(notesDir))
-                {
-                    Directory.CreateDirectory(notesDir);
-                }
-
-                File.WriteAllText(notesPath, content);
-
-                // If this is the first time notes are being saved, refresh the program list to show the icon
-                if (!hadNotesBefore)
-                {
-                    RefreshProgramList("");
-                }
-            }
-            else if (hadNotesBefore)
-            {
-                // If content is empty but file exists, delete the file
-                File.Delete(notesPath);
-                RefreshProgramList(""); // Refresh to remove the icon
-            }
+            notesRepository.Save(programName, content);
         }
         catch (Exception ex)
         {
@@ -1509,20 +1317,9 @@ public class MainWindow
         }
     }
 
-    private string GetNotesPath(string programName)
-    {
-        var notesDir = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-            ".config",
-            "gman",
-            "notes"
-        );
-        return Path.Combine(notesDir, $"{programName}.txt");
-    }
-
     private bool HasNotes(string programName)
     {
-        return File.Exists(GetNotesPath(programName));
+        return notesRepository.HasNotes(programName);
     }
 
     private void OnProgramListFocusIn(object? sender, FocusInEventArgs args)
@@ -1535,10 +1332,14 @@ public class MainWindow
 
     private void OnProgramListSelectionChangedForHint(object? sender, EventArgs e)
     {
-        if (programListView.HasFocus && programListView.Selection.GetSelected(out _))
+        // Check if the selected program is executable (has warning icon)
+        if (programListView.HasFocus && programListView.Selection.GetSelected(out TreeIter iter))
         {
+
             UpdateStatusWithHint(" - Press + key to add this program to your favorites list");
+
         }
+
     }
 
     private void OnFavoritesListFocusIn(object? sender, FocusInEventArgs args)
@@ -1578,8 +1379,26 @@ public class MainWindow
     {
         if (programListView.GetPathAtPos(args.X, args.Y, out TreePath path))
         {
-            args.Tooltip.Text = "Press + key to add this program to your favorites list";
-            args.RetVal = true;
+            // Get the model and iterator for this path
+            if (programListView.Model.GetIter(out TreeIter iter, path))
+            {
+                // Check column 1 (notes icon column) for WARNING_ICON
+                string notesIcon = programListView.Model.GetValue(iter, 1) as string ?? "";
+
+                if (notesIcon == WARNING_ICON)
+                {
+                    args.Tooltip.Text = "Warning, this is an executable program and will execute it with '--help' to for viewing purposes";
+                }
+                else
+                {
+                    args.Tooltip.Text = "Press + key to add this program to your favorites list";
+                }
+                args.RetVal = true;
+            }
+            else
+            {
+                args.RetVal = false;
+            }
         }
         else
         {
@@ -1602,15 +1421,14 @@ public class MainWindow
 
     private void ResetTypeAheadBuffer()
     {
-        Console.WriteLine($"DEBUG: ResetTypeAheadBuffer called! Buffer was: '{typeAheadBuffer}'");
+        Console.WriteLine($"DEBUG: ResetTypeAheadBuffer called! Buffer was: '{typeAheadNavigator.Buffer}'");
         Console.WriteLine($"DEBUG: Stack trace: {Environment.StackTrace}");
-        typeAheadBuffer = "";
+        typeAheadNavigator.Reset();
         typeAheadTimeoutId = null;
-        isInTypeAhead = false;  // Clear the flag
 
         // Restore status label to cached message (avoid GTK event processing)
         statusLabel.Text = cachedStatusMessage;
-        Console.WriteLine($"DEBUG: ResetTypeAheadBuffer complete. Buffer now: '{typeAheadBuffer}'");
+        Console.WriteLine($"DEBUG: ResetTypeAheadBuffer complete. Buffer now: '{typeAheadNavigator.Buffer}'");
     }
 
     private void ClearSearchHighlights()
@@ -1659,6 +1477,51 @@ public class MainWindow
         }
     }
 
+    private void OnManPageViewButtonRelease(object? sender, ButtonReleaseEventArgs args)
+    {
+        // Only auto-copy if the setting is enabled
+        if (!settings.AutoCopySelection)
+            return;
+
+        // Only handle left mouse button release
+        if (args.Event.Button != 1)
+            return;
+
+        Console.WriteLine("DEBUG: OnManPageViewButtonRelease fired, attempting to copy selection to clipboard");
+        try
+        {
+            // Get the selected text
+            TextIter start, end;
+            if (manPageView.Buffer.GetSelectionBounds(out start, out end))
+            {
+                string selectedText = manPageView.Buffer.GetText(start, end, false);
+
+                // Only copy non-empty selections
+                if (!string.IsNullOrWhiteSpace(selectedText))
+                {
+                    // Copy to clipboard
+                    var clipboard = Gtk.Clipboard.Get(Gdk.Atom.Intern("CLIPBOARD", false));
+                    clipboard.Text = selectedText;
+
+                    string statusText = $"'{selectedText}'";
+                    if (statusText.Length > 200)
+                    {
+                        statusText = statusText.Substring(0, 200);
+                    }
+                    statusText = $"Selection was copied to clipboard! - {statusText}";
+                    statusLabel.Text = statusText;
+
+                    Console.WriteLine($"DEBUG: Copied to clipboard: '{selectedText}'");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            // Silently ignore clipboard errors to avoid disrupting the user
+            Console.WriteLine($"Error copying to clipboard: {ex.Message}");
+        }
+    }
+
     private void LoadManPageAndSelect(string programName)
     {
         // First, try to find and select the program in the list
@@ -1700,13 +1563,13 @@ public class MainWindow
 
     private void OnAboutClicked(object? sender, EventArgs e)
     {
-        string version = Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "1.0";
+        string version = Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "2.0";
 
         using var about = new AboutDialog
         {
             ProgramName = "GMan",
             Version = version,
-            Comments = "GTK# man page viewer for X11/Linux",
+            Comments = "A graphical man page viewer for Linux/X11 environments, written in C# using GTK#. Features favorites list, smart filtering, advanced search, keyboard navigation, clickable man references, nicely colored and formatted text in the manuals and command-line integration.",
             Website = "https://www.yourdev.net/gnome-man-viewer",
             Authors = new[] { "Maximilian Cornett <max@yourdev.net>",
                             "https://www.yourdev.net" }
@@ -1738,9 +1601,8 @@ public class MainWindow
             // Clear any existing search state
             ClearSearchHighlights();
             searchEntry.Text = "";
-            searchMatches.Clear();
-            currentMatchIndex = -1;
-            lastSearchTerm = null;
+            searchManager.Clear();
+            searchManager.Clear();
             manPageReferences.Clear();
 
             // Set the help text
@@ -1761,76 +1623,19 @@ public class MainWindow
 
     private void FormatHelpText()
     {
-        TextBuffer buffer = manPageView.Buffer;
-        string text = buffer.Text;
-        string[] lines = text.Split('\n');
-
-        for (int lineIndex = 0; lineIndex < lines.Length; lineIndex++)
+        // Create adapter and tag lookup
+        var tagLookup = new Dictionary<string, TextTag>
         {
-            string line = lines[lineIndex];
-            if (string.IsNullOrWhiteSpace(line))
-                continue;
+            [ManPageFormatter.HeaderTag] = headerTag,
+            [ManPageFormatter.OptionTag] = optionTag,
+            [ManPageFormatter.FilePathTag] = filePathTag,
+            [ManPageFormatter.UrlTag] = urlTag
+        };
 
-            // Calculate line offset
-            int lineStart = 0;
-            for (int i = 0; i < lineIndex; i++)
-                lineStart += lines[i].Length + 1; // +1 for newline
+        var adapter = new GtkTextBufferAdapter(manPageView.Buffer, tagLookup);
 
-            // Section headers (all caps, standalone lines)
-            if (lineIndex > 0 && lineIndex < lines.Length - 1 &&
-                line == line.ToUpper() && line.Length > 0 &&
-                !line.StartsWith("    ") && !line.StartsWith("\t"))
-            {
-                TextIter start = buffer.GetIterAtOffset(lineStart);
-                TextIter end = buffer.GetIterAtOffset(lineStart + line.Length);
-                buffer.ApplyTag(headerTag, start, end);
-                continue;
-            }
-
-            // Options and commands indented with spaces
-            if (line.StartsWith("    ") && line.Trim().Length > 0)
-            {
-                // Check for option patterns like "+ key", "- key", "Enter", etc.
-                var optionMatch = System.Text.RegularExpressions.Regex.Match(line, @"^\s+([+\-]|Enter|Return|Letters)\s+(key|-)\s");
-                if (optionMatch.Success)
-                {
-                    int matchStart = lineStart + optionMatch.Index;
-                    int matchEnd = matchStart + optionMatch.Length;
-                    TextIter start = buffer.GetIterAtOffset(matchStart);
-                    TextIter end = buffer.GetIterAtOffset(matchEnd);
-                    buffer.ApplyTag(optionTag, start, end);
-                    continue;
-                }
-            }
-
-            // File paths
-            if (line.Contains("~/.config/gman") || line.Contains("/home/"))
-            {
-                var pathMatches = System.Text.RegularExpressions.Regex.Matches(line, @"(/[^\s]+|~/[^\s]+)");
-                foreach (System.Text.RegularExpressions.Match match in pathMatches)
-                {
-                    int matchStart = lineStart + match.Index;
-                    int matchEnd = matchStart + match.Length;
-                    TextIter start = buffer.GetIterAtOffset(matchStart);
-                    TextIter end = buffer.GetIterAtOffset(matchEnd);
-                    buffer.ApplyTag(filePathTag, start, end);
-                }
-            }
-
-            // URLs
-            if (line.Contains("http://") || line.Contains("https://"))
-            {
-                var urlMatches = System.Text.RegularExpressions.Regex.Matches(line, @"https?://[^\s]+");
-                foreach (System.Text.RegularExpressions.Match match in urlMatches)
-                {
-                    int matchStart = lineStart + match.Index;
-                    int matchEnd = matchStart + match.Length;
-                    TextIter start = buffer.GetIterAtOffset(matchStart);
-                    TextIter end = buffer.GetIterAtOffset(matchEnd);
-                    buffer.ApplyTag(urlTag, start, end);
-                }
-            }
-        }
+        // Use formatter to apply tags
+        formatter.FormatHelpText(adapter);
     }
 
     private void OnSettingsClicked(object? sender, EventArgs e)
@@ -1841,8 +1646,9 @@ public class MainWindow
             var oldUseSingleClick = settings.UseSingleClick;
             var oldEnableHelpFallback = settings.EnableHelpFallback;
             var oldFavoritesAtTop = settings.FavoritesAtTop;
+            var oldAutoCopySelection = settings.AutoCopySelection;
 
-            var (response, newEnableHelpFallback, newUseSingleClick, newFavoritesAtTop) = SettingsDialog.ShowDialog(mainWindow);
+            var (response, newEnableHelpFallback, newUseSingleClick, newFavoritesAtTop, newAutoCopySelection) = SettingsDialog.ShowDialog(mainWindow);
 
             if (response == ResponseType.Ok)
             {
@@ -1923,5 +1729,32 @@ public class MainWindow
 
         string devPath = System.IO.Path.Combine(baseDir, "..", "..", "..", "ui", "main_window.ui");
         return System.IO.Path.GetFullPath(devPath);
+    }
+
+    /// <summary>
+    /// Adapter to bridge GTK's TextBuffer to ManPageFormatter's ITextBuffer interface
+    /// </summary>
+    private class GtkTextBufferAdapter : ITextBuffer
+    {
+        private readonly TextBuffer buffer;
+        private readonly Dictionary<string, TextTag> tagLookup;
+
+        public GtkTextBufferAdapter(TextBuffer buffer, Dictionary<string, TextTag> tagLookup)
+        {
+            this.buffer = buffer;
+            this.tagLookup = tagLookup;
+        }
+
+        public string Text => buffer.Text;
+
+        public void ApplyTag(string tagName, int startOffset, int endOffset)
+        {
+            if (tagLookup.TryGetValue(tagName, out var tag))
+            {
+                TextIter start = buffer.GetIterAtOffset(startOffset);
+                TextIter end = buffer.GetIterAtOffset(endOffset);
+                buffer.ApplyTag(tag, start, end);
+            }
+        }
     }
 }
