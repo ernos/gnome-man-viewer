@@ -8,8 +8,13 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>GMan</RootNamespace>
     <AssemblyName>gman</AssemblyName>
-    <Version>1.1</Version>
-    <Description>GTK# Man Page Viewer for X11</Description>
+    <!-- Version Management: Single source of truth -->
+    <VersionPrefix>2.0</VersionPrefix>
+    <BuildNumber>1</BuildNumber>
+    <Version>$(VersionPrefix).$(BuildNumber)</Version>
+    <AssemblyVersion>$(VersionPrefix).0.0</AssemblyVersion>
+    <FileVersion>$(Version)</FileVersion>
+    <Description>GTK Man Page Viewer for X11</Description>
   </PropertyGroup>
 
   <ItemGroup>

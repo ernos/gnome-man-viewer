@@ -49,3 +49,5 @@ Thumbs.db
 
 .history
 COMMIT_MSG.txt
+doc/README-DEV.md
+.github/copilot-instructions.md

@@ -61,6 +61,22 @@ public class ProgramDiscoveryService
         return programs;
     }
 
+    public List<string> GetExecutablePrograms()
+    {
+        // Scan directories for executables
+        var programs = ScanDirectories();
+
+
+        var manPages = QueryManPageDatabase();
+        if (manPages.Count > 0)
+        {
+            // Intersect: only programs that does not exist in man database
+            programs = programs.Where(p => !manPages.Contains(p)).ToList();
+        }
+
+        return programs;
+    }
+
     /// <summary>
     /// Scans configured directories for executable files.
     /// </summary>

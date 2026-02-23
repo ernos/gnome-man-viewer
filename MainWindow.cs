@@ -54,6 +54,7 @@ public class MainWindow
     private readonly ManPageLoader manPageLoader = new();
     private const string FAVORITE_ICON = "starred";
     private const string NOTES_ICON = "text-x-generic";
+    private const string WARNING_ICON = "dialog-warning";
     private TextTag highlightTag;
     private TextTag currentMatchTag;
     private TextTag headerTag;
@@ -65,6 +66,7 @@ public class MainWindow
     private TextTag urlTag;
     private TextTag manReferenceTag;
     private List<string> allPrograms = new();
+    private List<string> executablePrograms = new();
     private bool isManPageLoaded = false;
     private string? currentLoadedProgram;
     private Dictionary<(int start, int end), string> manPageReferences = new();
@@ -360,6 +362,7 @@ public class MainWindow
     {
         // Discover programs, filtering by man pages if help fallback is disabled
         allPrograms = programDiscovery.DiscoverPrograms(filterByManPages: !settings.EnableHelpFallback);
+        executablePrograms = programDiscovery.GetExecutablePrograms();
 
         RefreshProgramList("");
         RefreshFavoritesList();
@@ -440,12 +443,24 @@ public class MainWindow
 
         foreach (var program in filtered)
         {
-            // Column 0: favorite icon (show star if favorited)
+            // Column 0: favsorite icon (show star if favorited)
             string favoriteIcon = favoritesManager.IsFavorite(program) ? FAVORITE_ICON : "";
-            // Column 1: notes icon (show document if has notes)
-            string notesIcon = HasNotes(program) ? NOTES_ICON : "";
-            // Column 2: program name
-            programStore.AppendValues(favoriteIcon, notesIcon, program);
+
+            if (executablePrograms.Contains(program))
+            {
+                // If program is executable display a warning icon in the notes column to indicate 
+                // that it is executable and might be a security risk since it calls the program with '--help'
+                programStore.AppendValues(favoriteIcon, WARNING_ICON, program);
+            }
+            else
+            {
+                // Column 1: notes icon (show document if has notes)
+                string notesIcon = HasNotes(program) ? NOTES_ICON : "";
+
+                // Column 2: program name
+                programStore.AppendValues(favoriteIcon, notesIcon, program);
+            }
+
         }
 
         // Reattach model after populating
@@ -1305,10 +1320,14 @@ public class MainWindow
 
     private void OnProgramListSelectionChangedForHint(object? sender, EventArgs e)
     {
-        if (programListView.HasFocus && programListView.Selection.GetSelected(out _))
+        // Check if the selected program is executable (has warning icon)
+        if (programListView.HasFocus && programListView.Selection.GetSelected(out TreeIter iter))
         {
+
             UpdateStatusWithHint(" - Press + key to add this program to your favorites list");
+
         }
+
     }
 
     private void OnFavoritesListFocusIn(object? sender, FocusInEventArgs args)
@@ -1348,8 +1367,26 @@ public class MainWindow
     {
         if (programListView.GetPathAtPos(args.X, args.Y, out TreePath path))
         {
-            args.Tooltip.Text = "Press + key to add this program to your favorites list";
-            args.RetVal = true;
+            // Get the model and iterator for this path
+            if (programListView.Model.GetIter(out TreeIter iter, path))
+            {
+                // Check column 1 (notes icon column) for WARNING_ICON
+                string notesIcon = programListView.Model.GetValue(iter, 1) as string ?? "";
+
+                if (notesIcon == WARNING_ICON)
+                {
+                    args.Tooltip.Text = "Warning, this is an executable program and will execute it with '--help' to for viewing purposes";
+                }
+                else
+                {
+                    args.Tooltip.Text = "Press + key to add this program to your favorites list";
+                }
+                args.RetVal = true;
+            }
+            else
+            {
+                args.RetVal = false;
+            }
         }
         else
         {
@@ -1514,7 +1551,7 @@ public class MainWindow
 
     private void OnAboutClicked(object? sender, EventArgs e)
     {
-        string version = Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "1.1";
+        string version = Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "2.0";
 
         using var about = new AboutDialog
         {
