@@ -6,6 +6,154 @@ All notable changes to GMan will be documented in this file.
 
 ### Added
 
+* **Centralized version management**: Implemented build number tracking system:
+  + Single source of truth for version in gman.csproj
+  + Version format: Major.Minor.Build (e.g., 2.0.1)
+  + Properties: VersionPrefix, BuildNumber, Version (computed), AssemblyVersion, FileVersion
+  + About dialog automatically displays full version from assembly metadata
+  + Created tools/bump-version.sh script for automated version increments
+  + Added version release workflow documentation in doc/README-DEV.md
+  + Version consistency across gman.csproj, help.txt, and About dialog
+
+* **System-wide installation feature**: Added installation button in settings dialog:
+  + "Install GMan System-Wide..." button in settings
+  + Choose between user-local installation (recommended, no sudo) or system-wide installation (requires sudo)
+  + User-local installation:
+    - Installs to ~/.local/bin/gman
+    - Desktop entry in ~/.local/share/applications
+    - Icon in ~/.local/share/icons
+    - Only available to your user account
+  + System-wide installation:
+    - Installs to /usr/bin/gman (requires PolicyKit/pkexec)
+    - Desktop entry in /usr/share/applications
+    - Icon in /usr/share/icons
+    - Available to all users on the system
+  + Works on GNOME, KDE, XFCE, and other Linux desktops
+  + Graphical password prompt for system-wide installation (via PolicyKit)
+  + Automatic icon cache and desktop database updates
+  + Clear success/error messages and user cancellation support
+
+## [1.1] - 2026-02-15
+
+### Added
+
+* **"Add to Favorites" button in toolbar**: Added button to favorite the currently displayed man page:
+  + Button appears in toolbar between search navigation and settings
+  + Works with any displayed man page, including subcommands not in program list
+  + Enabled only when a man page is loaded
+  + Supports favoriting programs like "nvme-device-smart-scan" that aren't standalone executables
+  + Status bar shows confirmation when program is added to favorites
+
+* **Smart notes panel with collapsible interface**: Completely redesigned notes panel behavior:
+  + Notes panel hidden by default to maximize man page viewing space
+  + "Show Notes" checkbox appears in man page header when notes are hidden
+  + "Hide Notes" checkbox appears in notes panel header when notes are visible
+  + Both checkboxes stay synchronized - toggle either to show/hide notes
+  + Notes panel completely hidden when disabled (no wasted space)
+  + Horizontal and vertical scrollbars for long notes
+  + Notes panel appears to the right with 300px default width
+
+* **Enhanced man page header**: Man page label now displays contextual information:
+  + Shows first line of man page (e.g., "A2ENMOD(8) System Manager's Manual A2ENMOD(8)")
+  + Window title updates to show current man page (e.g., "GMan - A2ENMOD Manual")
+  + Provides instant context about what you're viewing
+
+* **Improved syntax highlighting in man pages**: Enhanced visual hierarchy:
+  + First word on each line in NAME and SYNOPSIS sections highlighted as command
+  + Helps quickly identify program names, subcommands, and primary functions
+  + Consistent purple, bold styling matches command highlighting elsewhere
+
+* **Enhanced type-ahead search**: Significantly improved quick navigation:
+  + Buffer increased from 5 to 10 characters for longer search terms
+  + Timeout extended from 1 to 5 seconds for more comfortable typing
+  + Bold orange timer icon (⏱) with "Type-ahead timeout - cleared" message when buffer resets
+  + Clear visual feedback helps users understand when search buffer was cleared
+  + Works in both programs and favorites lists
+
+### Fixed
+
+* **Man page text width calculation**: Fixed word wrapping and formatting issues:
+  + Calculates actual character width of man page TextView using Pango layout
+  + Sets MANWIDTH environment variable before calling man command
+  + Man pages now properly formatted to match TextView width
+  + Eliminates awkward line breaks and horizontal scrolling
+  + Dynamically adjusts when window is resized
+
+* **Favorites persistence for subcommands**: Fixed favorites not loading for non-listed programs:
+  + Removed filtering that prevented subcommands from appearing in favorites
+  + Favorites list now shows all saved programs, even if not in program scan
+  + Programs like "nvme-device-smart-scan" now persist across restarts
+  + Enables favoriting of man pages accessed via command-line arguments
+
+* **Empty notes file prevention**: Notes files only created when content exists:
+  + No empty files created in `~/.config/gman/notes/` directory
+  + Existing empty files deleted when content cleared
+  + Notes icon (📄) only shows for programs with actual note content
+  + Cleaner file system without unused note files
+
+* **Notes panel visibility**: Fixed multiple issues with notes panel behavior:
+  + Panel properly hidden on startup when setting is disabled
+  + Checkbox and controls remain accessible when panel is hidden
+  + Man page gets full width when notes are hidden
+  + No wasted space or layout glitches
+
+### Technical Details
+
+* **MANWIDTH implementation**:
+  + Added `CalculateTextViewCharacterWidth()` method using Pango layout measurement
+  + Modified `GetManPageContent()` to accept width parameter and set MANWIDTH environment variable
+  + Man pages formatted to exact character width (between 40-200 chars, default 80)
+
+* **Notes panel restructure**:
+  + Split UI into `notesContainerBox` (always visible) and `notesBox` (toggleable)
+  + Added `manNotesCheck` checkbox in man page header for toggling notes
+  + Added `OnManNotesCheckToggled()` handler to sync with main notes checkbox
+  + Updated `UpdateNotesVisibility()` to hide entire container and show controls in header
+  + Added horizontal/vertical scroll policies to notesScroll
+
+* **Favorites persistence changes**:
+  + Modified `CleanupFavorites()` to skip filtering (preserves all favorites)
+  + Removed `CleanupFavorites()` calls from startup sequence
+  + Favorites now loaded directly from settings without validation against program list
+
+* **Man page header updates**:
+  + Added `manLabel` field for displaying man page information
+  + Added `UpdateManPageHeader()` method to extract first line and update window title
+  + Called after successful man page load in `LoadManPage()`
+
+* **Type-ahead improvements**:
+  + Increased buffer size constant from 5 to 10 characters
+  + Increased timeout from 1000ms to 3000ms
+  + Added two-stage timeout: 5s delay + 2s visual feedback message
+  + Used Pango markup for bold orange styling: `<span foreground='orange' weight='bold'>⏱ Type-ahead timeout - cleared</span>`
+
+* **Syntax highlighting enhancement**:
+  + Added `inNameSection` and `inSynopsisSection` boolean flags
+  + Modified section detection in `FormatManPage()` to track NAME and SYNOPSIS
+  + Added regex `^\s*([\S]+)` to match first word after optional whitespace
+  + Applied `commandTag` highlighting to first words in these sections
+
+* **Major refactoring - service extraction** (Phases 1-3):
+  + Extracted 7 service classes from MainWindow (1,189 lines of business logic)
+  + Reduced MainWindow from 2,076 to 1,710 lines (366 lines removed, 17.6% reduction)
+  + Created 199 comprehensive unit tests covering all service layer logic
+  + Services extracted:
+    - ManPageFormatter (319 lines, 67 tests) - Syntax highlighting and formatting
+    - TypeAheadNavigator (112 lines, 20 tests) - Type-ahead buffer and matching
+    - NotesRepository (166 lines, 25 tests) - Notes file persistence
+    - ProgramDiscoveryService (171 lines, 15 tests) - Executable scanning and filtering
+    - FavoritesManager (106 lines, 26 tests) - Favorites CRUD with auto-save
+    - SearchManager (130 lines, 26 tests) - Search state and navigation
+    - ManPageLoader (185 lines, 19 tests) - Man page and help content loading
+  + All services have zero GTK dependencies (100% testable without UI)
+  + Created comprehensive integration testing documentation
+  + Maintained 100% backward compatibility
+  + See [doc/REFACTORING-SUMMARY.md](REFACTORING-SUMMARY.md) for complete details
+
+## [Unreleased]
+
+### Added
+
 * **Note-taking for individual man pages**: Added a collapsible notes panel for taking notes on each man page:
   + Notes panel appears to the right of the man page view
   + Toggle visibility with checkbox in panel header or press 'n' key
